@@ -1,8 +1,8 @@
-# Spring Bean初始化- BeanPostProcessor
+# BeanPostProcessor-AbstractAutoProxyCreator
 
 
 
-BeanPostPorcessor
+## 一、BeanPostPorcessor
 
 ```java
 public interface BeanPostProcessor {
@@ -33,7 +33,7 @@ public interface BeanPostProcessor {
 
 
 
-InstantiationAwareBeanPostProcessor
+## 二、InstantiationAwareBeanPostProcessor
 
 ```java
 public interface InstantiationAwareBeanPostProcessor extends BeanPostProcessor {
@@ -90,9 +90,9 @@ public interface InstantiationAwareBeanPostProcessor extends BeanPostProcessor {
 
 
 
+## 三、AbstractAutoProxyCreator
 
 
-AbstractAutoProxyCreator
 
 ```java
 public abstract class AbstractAutoProxyCreator extends ProxyProcessorSupport implements SmartInstantiationAwareBeanPostProcessor, BeanFactoryAware {
@@ -188,8 +188,10 @@ public abstract class AbstractAutoProxyCreator extends ProxyProcessorSupport imp
             if (StringUtils.hasLength(beanName)) {
                 this.targetSourcedBeans.add(beanName);
             }
-
+						// 这里寻找对应beanClass和beanName的Advisor
             Object[] specificInterceptors = this.getAdvicesAndAdvisorsForBean(beanClass, beanName, targetSource);
+            // 将bean和对应的advisor整合一起生成一个Proxy对象，这个对象包含了beanName对应初始化完成的Bean以及与这个Bean
+            // 关联的所有Advisor，在最终调用的时候就会使用对应的Advisor
             Object proxy = this.createProxy(beanClass, beanName, specificInterceptors, targetSource);
             this.proxyTypes.put(cacheKey, proxy.getClass());
             return proxy;
@@ -198,20 +200,6 @@ public abstract class AbstractAutoProxyCreator extends ProxyProcessorSupport imp
         }
     }
 
-    public PropertyValues postProcessProperties(PropertyValues pvs, Object bean, String beanName) {
-        return pvs;
-    }
-
-    public Object postProcessAfterInitialization(@Nullable Object bean, String beanName) {
-        if (bean != null) {
-            Object cacheKey = this.getCacheKey(bean.getClass(), beanName);
-            if (this.earlyProxyReferences.remove(cacheKey) != bean) {
-                return this.wrapIfNecessary(bean, beanName, cacheKey);
-            }
-        }
-
-        return bean;
-    }
 
     protected Object getCacheKey(Class<?> beanClass, @Nullable String beanName) {
         if (StringUtils.hasLength(beanName)) {
@@ -219,41 +207,6 @@ public abstract class AbstractAutoProxyCreator extends ProxyProcessorSupport imp
         } else {
             return beanClass;
         }
-    }
-
-    protected Object wrapIfNecessary(Object bean, String beanName, Object cacheKey) {
-        if (StringUtils.hasLength(beanName) && this.targetSourcedBeans.contains(beanName)) {
-            return bean;
-        } else if (Boolean.FALSE.equals(this.advisedBeans.get(cacheKey))) {
-            return bean;
-        } else if (!this.isInfrastructureClass(bean.getClass()) && !this.shouldSkip(bean.getClass(), beanName)) {
-            Object[] specificInterceptors = this.getAdvicesAndAdvisorsForBean(bean.getClass(), beanName, (TargetSource)null);
-            if (specificInterceptors != DO_NOT_PROXY) {
-                this.advisedBeans.put(cacheKey, Boolean.TRUE);
-                Object proxy = this.createProxy(bean.getClass(), beanName, specificInterceptors, new SingletonTargetSource(bean));
-                this.proxyTypes.put(cacheKey, proxy.getClass());
-                return proxy;
-            } else {
-                this.advisedBeans.put(cacheKey, Boolean.FALSE);
-                return bean;
-            }
-        } else {
-            this.advisedBeans.put(cacheKey, Boolean.FALSE);
-            return bean;
-        }
-    }
-
-    protected boolean isInfrastructureClass(Class<?> beanClass) {
-        boolean retVal = Advice.class.isAssignableFrom(beanClass) || Pointcut.class.isAssignableFrom(beanClass) || Advisor.class.isAssignableFrom(beanClass) || AopInfrastructureBean.class.isAssignableFrom(beanClass);
-        if (retVal && this.logger.isTraceEnabled()) {
-            this.logger.trace("Did not attempt to auto-proxy infrastructure class [" + beanClass.getName() + "]");
-        }
-
-        return retVal;
-    }
-
-    protected boolean shouldSkip(Class<?> beanClass, String beanName) {
-        return AutoProxyUtils.isOriginalInstance(beanName, beanClass);
     }
 
     @Nullable
@@ -385,3 +338,13 @@ public abstract class AbstractAutoProxyCreator extends ProxyProcessorSupport imp
     protected abstract Object[] getAdvicesAndAdvisorsForBean(Class<?> beanClass, String beanName, @Nullable TargetSource customTargetSource) throws BeansException;
 }
 ```
+
+
+
+## 总结
+
+以前一直不明白Spring的代理模式是什么样的，我们的例子总是给出一个代理模式的UML图，然后告诉我们这就是代理模式。Spring框架在实现代理模式的时候其实和UML图中的实现类似。代理模式就是对原来的对象进行增强，将待增强的对象作为属性设置到代理对象中，然后在调用方法时先最终会调用到目标对象的方法上。Spring与我们平常的AOP之间的不同就是
+
+* 我们通过手动的方式创建对象和代理对象，而Spring框架自动管理对象和代理对象的创建
+* Spring在使用JDK提供的动态代理的基础上又增加了一种AspectJ的动态代理增强
+* 针对多个增强实现时结合了责任链设计模式来扩展了多个代理。
