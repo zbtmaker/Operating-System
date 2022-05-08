@@ -2,24 +2,14 @@
 ## 一、ConfigurationClassPostProcessor
 ClassConfigurationClassParser类主要是被ConfigurationClassPostProcessor（继承至BeanFactoryPostProcessor），所有的BeanFactoryPostProcessor都是在Spring容器初始化Bean之前执行的，我们可以在这个时候通过PropertySourcesPlaceholderConfigurer修改程序中的占位符，也可以通过这ConfigurationClassPostProcessor扫描注解了@Configuration的类，然后将注解了@Configuration的类以及相关的注解解析之后得到的BeanDefinition存放在BeanFactory。
 ### 1.1 AbstractApplicationContext
-
+容器启动的时候调用refresh方法然后首先初始化处理@Configuration注解的ConfigurationClassPostProcessor类，在Spring4.3版本之前，初始化BeanPostProcessor相关的类是postProcessorBeanFactory方法处理的，在最新的 Spring版本中把这个方法单独抽取出来交给PostProcessorRegistrationDelegate类来处理，就是把之前的方法主题迁移到新的类方法中去了。
 ```java
 public abstract class AbstractApplicationContext extends DefaultResourceLoader
 		implements ConfigurableApplicationContext {
 	@Override
 	public void refresh() throws BeansException, IllegalStateException {
 		synchronized (this.startupShutdownMonitor) {
-			StartupStep contextRefresh = this.applicationStartup.start("spring.context.refresh");
-
-			// Prepare this context for refreshing.
-			prepareRefresh();
-
-			// Tell the subclass to refresh the internal bean factory.
-			ConfigurableListableBeanFactory beanFactory = obtainFreshBeanFactory();
-
-			// Prepare the bean factory for use in this context.
-			prepareBeanFactory(beanFactory);
-
+			.... 省略与本次无关的代码
 			try {
                 // 以前 BeanPostProcessor在这个方法里面处理，现在是通过下面的invokeBeanFactoryPostProcessor处理的
 				// Allows post-processing of the bean factory in context subclasses.
@@ -33,48 +23,15 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 
 				// Register bean processors that intercept bean creation.
 				registerBeanPostProcessors(beanFactory);
-				beanPostProcess.end();
-
-				// Initialize message source for this context.
-				initMessageSource();
-
-				// Initialize event multicaster for this context.
-				initApplicationEventMulticaster();
-
-				// Initialize other special beans in specific context subclasses.
-				onRefresh();
-
-				// Check for listener beans and register them.
-				registerListeners();
-
-				// Instantiate all remaining (non-lazy-init) singletons.
-				finishBeanFactoryInitialization(beanFactory);
-
-				// Last step: publish corresponding event.
-				finishRefresh();
+				.... 省略与本次无关的代码
 			}
 
 			catch (BeansException ex) {
-				if (logger.isWarnEnabled()) {
-					logger.warn("Exception encountered during context initialization - " +
-							"cancelling refresh attempt: " + ex);
-				}
-
-				// Destroy already created singletons to avoid dangling resources.
-				destroyBeans();
-
-				// Reset 'active' flag.
-				cancelRefresh(ex);
-
-				// Propagate exception to caller.
-				throw ex;
+				.... 省略与本次无关的代码
 			}
 
 			finally {
-				// Reset common introspection caches in Spring's core, since we
-				// might not ever need metadata for singleton beans anymore...
-				resetCommonCaches();
-				contextRefresh.end();
+				.... 省略与本次无关的代码
 			}
 		}
 	}
@@ -98,6 +55,7 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 }
 ```
 
+### 1.2、ConfigurationClassPostProcessor
 
 上面通过某种方式将ConfigurationClassPostProcessor初始化好之后在下面的方法开始创建一个ConfigurationClassParser类用来专门解析@Configuration
 ```java
@@ -184,6 +142,7 @@ public class ConfigurationClassPostProcessor implements BeanDefinitionRegistryPo
 			parser.parse(candidates);
 			parser.validate();
 
+			// 这里会调用configurationClassParser的方法来解析注解@Configuration的类，然后将
 			Set<ConfigurationClass> configClasses = new LinkedHashSet<>(parser.getConfigurationClasses());
 			configClasses.removeAll(alreadyParsed);
 
@@ -238,8 +197,8 @@ public class ConfigurationClassPostProcessor implements BeanDefinitionRegistryPo
 ClassConfigurationClassParser这个类主要是为了解析Spring框架中的@Configuration注解，同时，在@Configuration注解是注解在类上面的注解，上面可以添加以下几种注解
 *  @ComponentScans：这个注解主要是指定要扫描的包或者类名，同时也可以指定不扫描的包名
 *  @ComponentScan：这个注解主要是指定扫描的包名或者类名，和上面的@ComponentScans注解类似
-*  @Import
-*  @PropertySource
+*  @Import：这个Import注解和之前的XML文件中的\<import\>标签有些类似，但是这个Import注解往往和ImportSelector接口的实现类一起使用，后面会单出一个文档解决这个事情。
+*  @PropertySource：通过增额注解可以加载项目中的.properties、.ymal格式的文件
 *  @ImportResource
 
 
@@ -332,7 +291,7 @@ class ConfigurationClassParser {
 			}
 		}
 
-        // 这里处理@Configuration注解上面的@Import注解
+        // 这里处理@Configuration注解上面的注解上面有@Import注解，此处@EnableCaching类上面被@Import注解
 		// Process any @Import annotations
 		processImports(configClass, sourceClass, getImports(sourceClass), filter, true);
 
@@ -374,7 +333,7 @@ class ConfigurationClassParser {
 	}
 
 	/**
-     * 处理类的内部类
+     * 这里主要是方式一个被@Configuration注解了的类里面的内部类也被@Configuration注解，那么此时就需要继续解析其中的内部类，直到
 	 * Register member (nested) classes that happen to be configuration classes themselves.
 	 */
 	private void processMemberClasses(ConfigurationClass configClass, SourceClass sourceClass,
