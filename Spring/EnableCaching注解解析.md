@@ -226,3 +226,48 @@ public class CachingConfigurationSelector extends AdviceModeImportSelector<Enabl
 	}
 }
 ```
+### ProxyCachingConfiguration
+ProxyCachingConfiguration类中提供了三个注解了@Bean的方法，这三个注解返回了生成缓存代理类的三个类CacheInterceptor、CacheOperationSource、BeanFactoryCacheOperationAdvisor。
+```java
+@Configuration(proxyBeanMethods = false)
+@Role(BeanDefinition.ROLE_INFRASTRUCTURE)
+public class ProxyCachingConfiguration extends AbstractCachingConfiguration {
+
+	@Bean(name = CacheManagementConfigUtils.CACHE_ADVISOR_BEAN_NAME)
+	@Role(BeanDefinition.ROLE_INFRASTRUCTURE)
+	public BeanFactoryCacheOperationSourceAdvisor cacheAdvisor(
+			CacheOperationSource cacheOperationSource, CacheInterceptor cacheInterceptor) {
+
+		BeanFactoryCacheOperationSourceAdvisor advisor = new BeanFactoryCacheOperationSourceAdvisor();
+		advisor.setCacheOperationSource(cacheOperationSource);
+		advisor.setAdvice(cacheInterceptor);
+		if (this.enableCaching != null) {
+			advisor.setOrder(this.enableCaching.<Integer>getNumber("order"));
+		}
+		return advisor;
+	}
+
+	@Bean
+	@Role(BeanDefinition.ROLE_INFRASTRUCTURE)
+	public CacheOperationSource cacheOperationSource() {
+		return new AnnotationCacheOperationSource();
+	}
+
+	@Bean
+	@Role(BeanDefinition.ROLE_INFRASTRUCTURE)
+	public CacheInterceptor cacheInterceptor(CacheOperationSource cacheOperationSource) {
+		CacheInterceptor interceptor = new CacheInterceptor();
+		interceptor.configure(this.errorHandler, this.keyGenerator, this.cacheResolver, this.cacheManager);
+		interceptor.setCacheOperationSource(cacheOperationSource);
+		return interceptor;
+	}
+
+}
+```
+其实通过这个链路已经把@EnableCaching注解需要的所有的
+## 总结
+* ConfigurationClassPostProcessor在容器启动的时候委托PostProcessorRegistrationDelegate类初始化ConfigurationClssPostProcessor类
+* 调用BeanFactoryPostProcessor的postProcessBeanFactory方法开启@Configuration的扫描
+* @EnableCaching注解添加在注解了@Configuration类，然后扫描的时候通过processImport方法扫描了@EnableCaching注解上的@Import注解
+* 通过处理@Import注解上的value值CachingConfigImportSelector，返回了ProxyCachingConfiguration
+* 因为ProxyCachingConfiguration类上面有@Configuration注解，同时ProxyCachingConfiguration类中有@Bean注解的方法，三个方法分别返回了CacheInterceptor、CacheOperationSource、BeanFactoryCacheOperationSourceAdvice.

@@ -684,3 +684,14 @@ class ConfigurationClassParser {
 	}
 }
 ```
+
+## 总结
+* 程序时候会调用AbsractApplicationContext的refresh方法初始化容器会首先初始化实现了BeanFactoryPostProcessor的类
+* 容器会委托PostProcessorRegistrationDelegate类初始化BeanFactoryPostProcessor类并调用接口的postProcessBeanFactory方法
+* 在这个方法中会初始化一个 ConfigurationClassParser类，这个类负责扫描所有的注解了@Configurtion的类
+* 调用processMembers方法，在扫描注解了@Configuration的类之后会首先扫描注解了内部类，因为@Configuration可以注解在类上面，所以如果当前类的内部类注解了@Configuration，也需要被解析
+* 处理@PropertySource注解，如果在@Configuration注解的类上面注解了@PropertySource，那么需要将注解制定的配置文件读取
+* @处理@ComponentScan和@ComponentScans注解，如果在@Configuration注解了@ComponentScans和@ComponentScan，那么需要将对应的类或者某一个路径下的所有的类BeanDefinition添加到DefaultListableBeanFactory中。
+* 调用retrieveBeanMethodMetadata处理@Bean注解的方法，如果@Configuration注解的类中的方法上面注解了@Bean注解，将返回的对象添加到DefaultListableBeanFactory。
+* 如果注解了@Configuration的类有实现的接口，那么需要判断接口中的default类型的方法上面是否有需要扫描的@Bean注解。
+* 如果类继承了父类，需要像解析当前类一样解析一遍父类。
