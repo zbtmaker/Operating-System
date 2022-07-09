@@ -145,7 +145,88 @@ zoubaitao@zoubaitaodeMacBook-Pro ~ % brew services stop zookeeper
 Stopping `zookeeper`... (might take a while)
 ==> Successfully stopped `zookeeper` (label: homebrew.mxcl.zookeeper)
 ```
-## 二、配置Kafka集群
+## 二、Kafka集群
+### 2.1、配置Kafka集群
+配置Kafka集群，我们先进入到Kafka的安装目录，然后进入到配置文件目录
+
+```bash
+cp server.properties server1.properties
+cp server.properties server2.properties
+```
+
+然后修改server*.properties文件
+
+edit |server.properties |server1.properties |server2.properties |
+|------|------|------|------|
+|broker_id|broker_id=0|broker.id=1| broker_id=2|
+|listeners|listeners=PLAINTEXT://:9092 |listeners=PLAINTEXT://:9093|listeners=PLAINTEXT://:9094|
+|logs|log.dirs=/usr/local/var/lib/kafka-logs-0|log.dirs=/usr/local/var/lib/kafka-logs-1|log.dirs=/usr/local/var/lib/kafka-logs-2|
+
+### 2.2、启动Kafka集群
+
+```bash
+zoubaitao@zoubaitaodeMacBook-Pro ~ % kafka-server-start /usr/local/Cellar/kafka/3.2.0/libexec/config/server.properties
+zoubaitao@zoubaitaodeMacBook-Pro ~ % kafka-server-start /usr/local/Cellar/kafka/3.2.0/libexec/config/server.properties
+zoubaitao@zoubaitaodeMacBook-Pro ~ % kafka-server-start /usr/local/Cellar/kafka/3.2.0/libexec/config/server.properties
+```
+
+### 2.3、创建topic
+#### 2.3.1 创建topic
+这里顺便说一句，kafka已经不再使用zookeeper保存topic的信息，而是采用broker来保存对应的信息，因此这里下面有--bootstrap-server localhost:9092而不是--zookeeper localhost:2181
+```bash
+zoubaitao@zoubaitaodeMacBook-Pro ~ % kafka-topics.sh --create --bootstrap-server localhost:9092 --replication-factor 3 --partitions 1 --topic test
+```
+这条命令中的--replication-factor 3和--partition 1分别是什么意思呢？
+* replication-factor表示将任意一个分区复制到多个broker上，也就是说relication-factor指定的数值一定要比我们启动的broker要小，否则就会报异常。下面这个实例就说明了这个问题。
+```bash
+zoubaitao@zoubaitaodeMacBook-Pro ~ % kafka-topics --create --bootstrap-server localhost:9092 --replication-factor 4 --partitions 4 --topic broker_test
+WARNING: Due to limitations in metric names, topics with a period ('.') or underscore ('_') could collide. To avoid issues it is best to use either, but not both.
+Error while executing topic command : Replication factor: 4 larger than available brokers: 3.
+[2022-07-09 15:43:55,669] ERROR org.apache.kafka.common.errors.InvalidReplicationFactorException: Replication factor: 4 larger than available brokers: 3.
+ (kafka.admin.TopicCommand$)
+```
+* partition 3表示创建3个分区，我们开启了三个分区，如果我们的broker数量也是3的话，那么一个broker上面就会包含一个partition，如果一个partition的数量大于broker的数量时，就会通过hash的方式将剩下的partition存储到hash(partition) % brokerSize 后对应的broker。
+
+
+  
+
+#### 2.3.2、查看topic信息
+查看所有已经创建的Kafka topic名称
+```bash
+zoubaitao@zoubaitaodeMacBook-Pro ~ % kafka-topics --bootstrap-server localhost:9092 --list test
+```
+查看某一个topic的详情
+```bash
+zoubaitao@zoubaitaodeMacBook-Pro ~ % kafka-topics --bootstrap-server localhost:9092 --topic test --describe
+Topic: test	TopicId: Ccy0HpJEQAyH_a5XBdY7-A	PartitionCount: 1	ReplicationFactor: 3	Configs: segment.bytes=1073741824
+	Topic: test	Partition: 0	Leader: 1	Replicas: 1,2,0	Isr: 1,2,0
+```
+#### 2.3.3、删除topic
+```bash
+zoubaitao@zoubaitaodeMacBook-Pro ~ % kafka-topics --delete --bootstrap-server localhost:9092 --topic test
+```
+
+### 2.4、生产和消费消息
+生产消息
+```bash
+zoubaitao@zoubaitaodeMacBook-Pro ~ % kafka-console-producer --broker-list localhost:9092 --topic test
+>Test Message1
+>Test Message2
+>Test Message3
+>Test Message4     
+```
+
+消费消息
+```bash
+zoubaitao@zoubaitaodeMacBook-Pro ~ % kafka-console-consumer --bootstrap-server localhost:9092 --topic test --from-beginning
+Test Message1
+Test Message2
+Test Message3
+Test Message4
+^CProcessed a total of 4 messages
+```
+如果我想看每一个partition上有多少消息，应该怎么处理呢？
+
 ## 三、启停Kafka
 启动zookeeper
 ```bash
@@ -177,3 +258,5 @@ Stopping `zookeeper`... (might take a while)
 
 ## 参考文档
 [mac环境下使用brew安装Kafka(详细过程)](https://cloud.tencent.com/developer/article/1780636)
+
+[macOS上使用brew安装Kafka](https://qizhanming.com/blog/2021/01/05/how-to-install-kafka-on-macos-via-brew)
