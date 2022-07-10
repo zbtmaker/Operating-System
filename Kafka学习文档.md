@@ -205,6 +205,7 @@ Topic: test	TopicId: Ccy0HpJEQAyH_a5XBdY7-A	PartitionCount: 1	ReplicationFactor:
 ```bash
 zoubaitao@zoubaitaodeMacBook-Pro ~ % kafka-topics --delete --bootstrap-server localhost:9092 --topic test
 ```
+#### 2.3.4、创建consumer group
 
 ### 2.4、生产和消费消息
 生产消息
@@ -254,7 +255,104 @@ zoubaitao@zoubaitaodeMacBook-Pro ~ % brew services stop zookeeper
 Stopping `zookeeper`... (might take a while)
 ==> Successfully stopped `zookeeper` (label: homebrew.mxcl.zookeeper)
 ```
-## 四、
+## 四、Kafka重消费
+首先看一下application.properties的相关配置，
+```java
+kafka.producer.test.bootstrap.servers=localhost:9092,localhost:9093,localhost:9094
+kafka.consumer.test.bootstrap.servers=localhost:9092,localhost:9093,localhost:9094
+kafka.consumer.test.session.timeout=15000
+kafka.consumer.test.max.poll.interval.ms=10000
+kafka.consumer.test.enable.auto.commit=false
+kafka.consumer.test.batch.listener=false
+```
+这里配置的两次消费消息最大的间隔为10000ms，也就是第一次拉到的消息到第二次拉到的消息如果消费时间超出了10000ms那么就会提交失败。那么此时Kafka的broker就不会删除消息，下一次消费消息的时候就会重复拉取上一次未提交的消息。这里我们程序配置的max.poll.timeout.ms=10000ms，其实我消费程序中设置的睡眠时间为3000ms，那为什么还是会超出时间呢？
+
+
+```bash
+2022-07-10 12:22:36.273  INFO 3647 --- [ntainer#0-0-C-1] org.apache.kafka.clients.Metadata        : [Consumer clientId=consumer-testGroup-1, groupId=testGroup] Cluster ID: rB7bZWx2R06ebE66WjZdAQ
+2022-07-10 12:22:36.274  INFO 3647 --- [ntainer#0-0-C-1] o.a.k.c.c.internals.ConsumerCoordinator  : [Consumer clientId=consumer-testGroup-1, groupId=testGroup] Discovered group coordinator localhost:9092 (id: 2147483647 rack: null)
+2022-07-10 12:22:36.276  INFO 3647 --- [ntainer#0-0-C-1] o.a.k.c.c.internals.ConsumerCoordinator  : [Consumer clientId=consumer-testGroup-1, groupId=testGroup] (Re-)joining group
+2022-07-10 12:22:36.289  INFO 3647 --- [ntainer#0-0-C-1] o.a.k.c.c.internals.ConsumerCoordinator  : [Consumer clientId=consumer-testGroup-1, groupId=testGroup] Request joining group due to: need to re-join with the given member-id
+2022-07-10 12:22:36.289  INFO 3647 --- [ntainer#0-0-C-1] o.a.k.c.c.internals.ConsumerCoordinator  : [Consumer clientId=consumer-testGroup-1, groupId=testGroup] (Re-)joining group
+2022-07-10 12:22:36.290  INFO 3647 --- [ntainer#0-0-C-1] o.a.k.c.c.internals.ConsumerCoordinator  : [Consumer clientId=consumer-testGroup-1, groupId=testGroup] Successfully joined group with generation Generation{generationId=43, memberId='consumer-testGroup-1-7c9240a8-21e2-4ef2-9331-2957ff563dad', protocol='range'}
+2022-07-10 12:22:36.292  INFO 3647 --- [ntainer#0-0-C-1] o.a.k.c.c.internals.ConsumerCoordinator  : [Consumer clientId=consumer-testGroup-1, groupId=testGroup] Finished assignment for group at generation 43: {consumer-testGroup-1-7c9240a8-21e2-4ef2-9331-2957ff563dad=Assignment(partitions=[test-0, test-1, test-2, test-3])}
+2022-07-10 12:22:36.299  INFO 3647 --- [ntainer#0-0-C-1] o.a.k.c.c.internals.ConsumerCoordinator  : [Consumer clientId=consumer-testGroup-1, groupId=testGroup] Successfully synced group in generation Generation{generationId=43, memberId='consumer-testGroup-1-7c9240a8-21e2-4ef2-9331-2957ff563dad', protocol='range'}
+2022-07-10 12:22:36.299  INFO 3647 --- [ntainer#0-0-C-1] o.a.k.c.c.internals.ConsumerCoordinator  : [Consumer clientId=consumer-testGroup-1, groupId=testGroup] Notifying assignor about the new Assignment(partitions=[test-0, test-1, test-2, test-3])
+2022-07-10 12:22:36.302  INFO 3647 --- [ntainer#0-0-C-1] o.a.k.c.c.internals.ConsumerCoordinator  : [Consumer clientId=consumer-testGroup-1, groupId=testGroup] Adding newly assigned partitions: test-1, test-0, test-3, test-2
+2022-07-10 12:22:36.312  INFO 3647 --- [ntainer#0-0-C-1] o.a.k.c.c.internals.ConsumerCoordinator  : [Consumer clientId=consumer-testGroup-1, groupId=testGroup] Setting offset for partition test-1 to the committed offset FetchPosition{offset=50, offsetEpoch=Optional.empty, currentLeader=LeaderAndEpoch{leader=Optional[localhost:9094 (id: 2 rack: null)], epoch=2}}
+2022-07-10 12:22:36.312  INFO 3647 --- [ntainer#0-0-C-1] o.a.k.c.c.internals.ConsumerCoordinator  : [Consumer clientId=consumer-testGroup-1, groupId=testGroup] Setting offset for partition test-0 to the committed offset FetchPosition{offset=0, offsetEpoch=Optional.empty, currentLeader=LeaderAndEpoch{leader=Optional[localhost:9092 (id: 0 rack: null)], epoch=2}}
+2022-07-10 12:22:36.312  INFO 3647 --- [ntainer#0-0-C-1] o.a.k.c.c.internals.ConsumerCoordinator  : [Consumer clientId=consumer-testGroup-1, groupId=testGroup] Setting offset for partition test-3 to the committed offset FetchPosition{offset=20, offsetEpoch=Optional.empty, currentLeader=LeaderAndEpoch{leader=Optional[localhost:9092 (id: 0 rack: null)], epoch=2}}
+2022-07-10 12:22:36.312  INFO 3647 --- [ntainer#0-0-C-1] o.a.k.c.c.internals.ConsumerCoordinator  : [Consumer clientId=consumer-testGroup-1, groupId=testGroup] Setting offset for partition test-2 to the committed offset FetchPosition{offset=20, offsetEpoch=Optional.empty, currentLeader=LeaderAndEpoch{leader=Optional[localhost:9093 (id: 1 rack: null)], epoch=4}}
+2022-07-10 12:22:36.313  INFO 3647 --- [ntainer#0-0-C-1] o.s.k.l.KafkaMessageListenerContainer    : testGroup: partitions assigned: [test-1, test-0, test-3, test-2]
+2022-07-10 12:22:39.355  INFO 3647 --- [ntainer#0-0-C-1] c.z.c.s.impl.AlgorithmConsumerImpl       : consumer topic:test, message:"0"
+2022-07-10 12:22:42.359  INFO 3647 --- [ntainer#0-0-C-1] c.z.c.s.impl.AlgorithmConsumerImpl       : consumer topic:test, message:"1"
+2022-07-10 12:22:45.362  INFO 3647 --- [ntainer#0-0-C-1] c.z.c.s.impl.AlgorithmConsumerImpl       : consumer topic:test, message:"2"
+2022-07-10 12:22:46.398  WARN 3647 --- [ead | testGroup] o.a.k.c.c.internals.ConsumerCoordinator  : [Consumer clientId=consumer-testGroup-1, groupId=testGroup] consumer poll timeout has expired. This means the time between subsequent calls to poll() was longer than the configured max.poll.interval.ms, which typically implies that the poll loop is spending too much time processing messages. You can address this either by increasing max.poll.interval.ms or by reducing the maximum size of batches returned in poll() with max.poll.records.
+2022-07-10 12:22:46.398  INFO 3647 --- [ead | testGroup] o.a.k.c.c.internals.ConsumerCoordinator  : [Consumer clientId=consumer-testGroup-1, groupId=testGroup] Member consumer-testGroup-1-7c9240a8-21e2-4ef2-9331-2957ff563dad sending LeaveGroup request to coordinator localhost:9092 (id: 2147483647 rack: null) due to consumer poll timeout has expired.
+2022-07-10 12:22:46.399  INFO 3647 --- [ead | testGroup] o.a.k.c.c.internals.ConsumerCoordinator  : [Consumer clientId=consumer-testGroup-1, groupId=testGroup] Resetting generation due to: consumer pro-actively leaving the group
+2022-07-10 12:22:46.399  INFO 3647 --- [ead | testGroup] o.a.k.c.c.internals.ConsumerCoordinator  : [Consumer clientId=consumer-testGroup-1, groupId=testGroup] Request joining group due to: consumer pro-actively leaving the group
+2022-07-10 12:22:48.367  INFO 3647 --- [ntainer#0-0-C-1] c.z.c.s.impl.AlgorithmConsumerImpl       : consumer topic:test, message:"3"
+2022-07-10 12:22:51.368  INFO 3647 --- [ntainer#0-0-C-1] c.z.c.s.impl.AlgorithmConsumerImpl       : consumer topic:test, message:"4"
+2022-07-10 12:22:54.371  INFO 3647 --- [ntainer#0-0-C-1] c.z.c.s.impl.AlgorithmConsumerImpl       : consumer topic:test, message:"5"
+2022-07-10 12:22:57.376  INFO 3647 --- [ntainer#0-0-C-1] c.z.c.s.impl.AlgorithmConsumerImpl       : consumer topic:test, message:"6"
+2022-07-10 12:23:00.377  INFO 3647 --- [ntainer#0-0-C-1] c.z.c.s.impl.AlgorithmConsumerImpl       : consumer topic:test, message:"7"
+2022-07-10 12:23:03.382  INFO 3647 --- [ntainer#0-0-C-1] c.z.c.s.impl.AlgorithmConsumerImpl       : consumer topic:test, message:"8"
+2022-07-10 12:23:06.387  INFO 3647 --- [ntainer#0-0-C-1] c.z.c.s.impl.AlgorithmConsumerImpl       : consumer topic:test, message:"9"
+2022-07-10 12:23:06.389  INFO 3647 --- [ntainer#0-0-C-1] o.a.k.c.c.internals.ConsumerCoordinator  : [Consumer clientId=consumer-testGroup-1, groupId=testGroup] Failing OffsetCommit request since the consumer is not part of an active group
+2022-07-10 12:23:06.393 ERROR 3647 --- [ntainer#0-0-C-1] o.s.k.l.KafkaMessageListenerContainer    : Consumer exception
+
+java.lang.IllegalStateException: This error handler cannot process 'org.apache.kafka.clients.consumer.CommitFailedException's; no record information is available
+	at org.springframework.kafka.listener.DefaultErrorHandler.handleOtherException(DefaultErrorHandler.java:155) ~[spring-kafka-2.8.2.jar:2.8.2]
+	at org.springframework.kafka.listener.KafkaMessageListenerContainer$ListenerConsumer.handleConsumerException(KafkaMessageListenerContainer.java:1762) [spring-kafka-2.8.2.jar:2.8.2]
+	at org.springframework.kafka.listener.KafkaMessageListenerContainer$ListenerConsumer.run(KafkaMessageListenerContainer.java:1285) [spring-kafka-2.8.2.jar:2.8.2]
+	at java.util.concurrent.Executors$RunnableAdapter.call(Executors.java:511) [na:1.8.0_301]
+	at java.util.concurrent.FutureTask.run(FutureTask.java:266) [na:1.8.0_301]
+	at java.lang.Thread.run(Thread.java:748) [na:1.8.0_301]
+Caused by: org.apache.kafka.clients.consumer.CommitFailedException: Offset commit cannot be completed since the consumer is not part of an active group for auto partition assignment; it is likely that the consumer was kicked out of the group.
+	at org.apache.kafka.clients.consumer.internals.ConsumerCoordinator.sendOffsetCommitRequest(ConsumerCoordinator.java:1137) ~[kafka-clients-3.0.0.jar:na]
+	at org.apache.kafka.clients.consumer.internals.ConsumerCoordinator.commitOffsetsSync(ConsumerCoordinator.java:1002) ~[kafka-clients-3.0.0.jar:na]
+	at org.apache.kafka.clients.consumer.KafkaConsumer.commitSync(KafkaConsumer.java:1491) ~[kafka-clients-3.0.0.jar:na]
+	at org.springframework.kafka.listener.KafkaMessageListenerContainer$ListenerConsumer.doCommitSync(KafkaMessageListenerContainer.java:2978) [spring-kafka-2.8.2.jar:2.8.2]
+	at org.springframework.kafka.listener.KafkaMessageListenerContainer$ListenerConsumer.commitSync(KafkaMessageListenerContainer.java:2973) [spring-kafka-2.8.2.jar:2.8.2]
+	at org.springframework.kafka.listener.KafkaMessageListenerContainer$ListenerConsumer.commitIfNecessary(KafkaMessageListenerContainer.java:2959) [spring-kafka-2.8.2.jar:2.8.2]
+	at org.springframework.kafka.listener.KafkaMessageListenerContainer$ListenerConsumer.processCommits(KafkaMessageListenerContainer.java:2751) [spring-kafka-2.8.2.jar:2.8.2]
+	at org.springframework.kafka.listener.KafkaMessageListenerContainer$ListenerConsumer.pollAndInvoke(KafkaMessageListenerContainer.java:1313) [spring-kafka-2.8.2.jar:2.8.2]
+	at org.springframework.kafka.listener.KafkaMessageListenerContainer$ListenerConsumer.run(KafkaMessageListenerContainer.java:1236) [spring-kafka-2.8.2.jar:2.8.2]
+	... 3 common frames omitted
+
+2022-07-10 12:23:06.393  INFO 3647 --- [ntainer#0-0-C-1] o.a.k.c.c.internals.ConsumerCoordinator  : [Consumer clientId=consumer-testGroup-1, groupId=testGroup] Giving away all assigned partitions as lost since generation has been reset,indicating that consumer is no longer part of the group
+2022-07-10 12:23:06.393  INFO 3647 --- [ntainer#0-0-C-1] o.a.k.c.c.internals.ConsumerCoordinator  : [Consumer clientId=consumer-testGroup-1, groupId=testGroup] Lost previously assigned partitions test-1, test-0, test-3, test-2
+2022-07-10 12:23:06.394  INFO 3647 --- [ntainer#0-0-C-1] o.s.k.l.KafkaMessageListenerContainer    : testGroup: partitions lost: [test-1, test-0, test-3, test-2]
+2022-07-10 12:23:06.394  INFO 3647 --- [ntainer#0-0-C-1] o.s.k.l.KafkaMessageListenerContainer    : testGroup: partitions revoked: [test-1, test-0, test-3, test-2]
+2022-07-10 12:23:06.394  INFO 3647 --- [ntainer#0-0-C-1] o.a.k.c.c.internals.ConsumerCoordinator  : [Consumer clientId=consumer-testGroup-1, groupId=testGroup] (Re-)joining group
+2022-07-10 12:23:06.396  INFO 3647 --- [ntainer#0-0-C-1] o.a.k.c.c.internals.ConsumerCoordinator  : [Consumer clientId=consumer-testGroup-1, groupId=testGroup] Request joining group due to: need to re-join with the given member-id
+2022-07-10 12:23:06.396  INFO 3647 --- [ntainer#0-0-C-1] o.a.k.c.c.internals.ConsumerCoordinator  : [Consumer clientId=consumer-testGroup-1, groupId=testGroup] (Re-)joining group
+2022-07-10 12:23:06.397  INFO 3647 --- [ntainer#0-0-C-1] o.a.k.c.c.internals.ConsumerCoordinator  : [Consumer clientId=consumer-testGroup-1, groupId=testGroup] Successfully joined group with generation Generation{generationId=45, memberId='consumer-testGroup-1-aa1cbc3c-7464-448b-8ef3-d056e16567cd', protocol='range'}
+2022-07-10 12:23:06.398  INFO 3647 --- [ntainer#0-0-C-1] o.a.k.c.c.internals.ConsumerCoordinator  : [Consumer clientId=consumer-testGroup-1, groupId=testGroup] Finished assignment for group at generation 45: {consumer-testGroup-1-aa1cbc3c-7464-448b-8ef3-d056e16567cd=Assignment(partitions=[test-0, test-1, test-2, test-3])}
+2022-07-10 12:23:06.399  INFO 3647 --- [ntainer#0-0-C-1] o.a.k.c.c.internals.ConsumerCoordinator  : [Consumer clientId=consumer-testGroup-1, groupId=testGroup] Successfully synced group in generation Generation{generationId=45, memberId='consumer-testGroup-1-aa1cbc3c-7464-448b-8ef3-d056e16567cd', protocol='range'}
+2022-07-10 12:23:06.400  INFO 3647 --- [ntainer#0-0-C-1] o.a.k.c.c.internals.ConsumerCoordinator  : [Consumer clientId=consumer-testGroup-1, groupId=testGroup] Notifying assignor about the new Assignment(partitions=[test-0, test-1, test-2, test-3])
+2022-07-10 12:23:06.400  INFO 3647 --- [ntainer#0-0-C-1] o.a.k.c.c.internals.ConsumerCoordinator  : [Consumer clientId=consumer-testGroup-1, groupId=testGroup] Adding newly assigned partitions: test-1, test-0, test-3, test-2
+2022-07-10 12:23:06.401  INFO 3647 --- [ntainer#0-0-C-1] o.a.k.c.c.internals.ConsumerCoordinator  : [Consumer clientId=consumer-testGroup-1, groupId=testGroup] Setting offset for partition test-1 to the committed offset FetchPosition{offset=50, offsetEpoch=Optional.empty, currentLeader=LeaderAndEpoch{leader=Optional[localhost:9094 (id: 2 rack: null)], epoch=2}}
+2022-07-10 12:23:06.402  INFO 3647 --- [ntainer#0-0-C-1] o.a.k.c.c.internals.ConsumerCoordinator  : [Consumer clientId=consumer-testGroup-1, groupId=testGroup] Setting offset for partition test-0 to the committed offset FetchPosition{offset=0, offsetEpoch=Optional.empty, currentLeader=LeaderAndEpoch{leader=Optional[localhost:9092 (id: 0 rack: null)], epoch=2}}
+2022-07-10 12:23:06.402  INFO 3647 --- [ntainer#0-0-C-1] o.a.k.c.c.internals.ConsumerCoordinator  : [Consumer clientId=consumer-testGroup-1, groupId=testGroup] Setting offset for partition test-3 to the committed offset FetchPosition{offset=20, offsetEpoch=Optional.empty, currentLeader=LeaderAndEpoch{leader=Optional[localhost:9092 (id: 0 rack: null)], epoch=2}}
+2022-07-10 12:23:06.402  INFO 3647 --- [ntainer#0-0-C-1] o.a.k.c.c.internals.ConsumerCoordinator  : [Consumer clientId=consumer-testGroup-1, groupId=testGroup] Setting offset for partition test-2 to the committed offset FetchPosition{offset=20, offsetEpoch=Optional.empty, currentLeader=LeaderAndEpoch{leader=Optional[localhost:9093 (id: 1 rack: null)], epoch=4}}
+2022-07-10 12:23:06.402  INFO 3647 --- [ntainer#0-0-C-1] o.s.k.l.KafkaMessageListenerContainer    : testGroup: partitions assigned: [test-1, test-0, test-3, test-2]
+2022-07-10 12:23:09.410  INFO 3647 --- [ntainer#0-0-C-1] c.z.c.s.impl.AlgorithmConsumerImpl       : consumer topic:test, message:"0"
+2022-07-10 12:23:12.414  INFO 3647 --- [ntainer#0-0-C-1] c.z.c.s.impl.AlgorithmConsumerImpl       : consumer topic:test, message:"1"
+2022-07-10 12:23:15.419  INFO 3647 --- [ntainer#0-0-C-1] c.z.c.s.impl.AlgorithmConsumerImpl       : consumer topic:test, message:"2"
+2022-07-10 12:23:16.476  WARN 3647 --- [ead | testGroup] o.a.k.c.c.internals.ConsumerCoordinator  : [Consumer clientId=consumer-testGroup-1, groupId=testGroup] consumer poll timeout has expired. This means the time between subsequent calls to poll() was longer than the configured max.poll.interval.ms, which typically implies that the poll loop is spending too much time processing messages. You can address this either by increasing max.poll.interval.ms or by reducing the maximum size of batches returned in poll() with max.poll.records.
+2022-07-10 12:23:16.476  INFO 3647 --- [ead | testGroup] o.a.k.c.c.internals.ConsumerCoordinator  : [Consumer clientId=consumer-testGroup-1, groupId=testGroup] Member consumer-testGroup-1-aa1cbc3c-7464-448b-8ef3-d056e16567cd sending LeaveGroup request to coordinator localhost:9092 (id: 2147483647 rack: null) due to consumer poll timeout has expired.
+2022-07-10 12:23:16.478  INFO 3647 --- [ead | testGroup] o.a.k.c.c.internals.ConsumerCoordinator  : [Consumer clientId=consumer-testGroup-1, groupId=testGroup] Resetting generation due to: consumer pro-actively leaving the group
+2022-07-10 12:23:16.478  INFO 3647 --- [ead | testGroup] o.a.k.c.c.internals.ConsumerCoordinator  : [Consumer clientId=consumer-testGroup-1, groupId=testGroup] Request joining group due to: consumer pro-actively leaving the group
+2022-07-10 12:23:18.422  INFO 3647 --- [ntainer#0-0-C-1] c.z.c.s.impl.AlgorithmConsumerImpl       : consumer topic:test, message:"3"
+2022-07-10 12:23:21.427  INFO 3647 --- [ntainer#0-0-C-1] c.z.c.s.impl.AlgorithmConsumerImpl       : consumer topic:test, message:"4"
+2022-07-10 12:23:24.432  INFO 3647 --- [ntainer#0-0-C-1] c.z.c.s.impl.AlgorithmConsumerImpl       : consumer topic:test, message:"5"
+2022-07-10 12:23:27.435  INFO 3647 --- [ntainer#0-0-C-1] c.z.c.s.impl.AlgorithmConsumerImpl       : consumer topic:test, message:"6"
+2022-07-10 12:23:30.436  INFO 3647 --- [ntainer#0-0-C-1] c.z.c.s.impl.AlgorithmConsumerImpl       : consumer topic:test, message:"7"
+2022-07-10 12:23:33.441  INFO 3647 --- [ntainer#0-0-C-1] c.z.c.s.impl.AlgorithmConsumerImpl       : consumer topic:test, message:"8"
+2022-07-10 12:23:36.443  INFO 3647 --- [ntainer#0-0-C-1] c.z.c.s.impl.AlgorithmConsumerImpl       : consumer topic:test, message:"9"
+```
+
 
 ## 参考文档
 [mac环境下使用brew安装Kafka(详细过程)](https://cloud.tencent.com/developer/article/1780636)
