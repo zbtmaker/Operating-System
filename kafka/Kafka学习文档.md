@@ -255,7 +255,7 @@ zoubaitao@zoubaitaodeMacBook-Pro ~ % brew services stop zookeeper
 Stopping `zookeeper`... (might take a while)
 ==> Successfully stopped `zookeeper` (label: homebrew.mxcl.zookeeper)
 ```
-## 四、Kafka重消费
+## 四、Kafka提交失败
 首先看一下application.properties的相关配置，
 ```java
 kafka.producer.test.bootstrap.servers=localhost:9092,localhost:9093,localhost:9094
@@ -352,7 +352,51 @@ Caused by: org.apache.kafka.clients.consumer.CommitFailedException: Offset commi
 2022-07-10 12:23:33.441  INFO 3647 --- [ntainer#0-0-C-1] c.z.c.s.impl.AlgorithmConsumerImpl       : consumer topic:test, message:"8"
 2022-07-10 12:23:36.443  INFO 3647 --- [ntainer#0-0-C-1] c.z.c.s.impl.AlgorithmConsumerImpl       : consumer topic:test, message:"9"
 ```
+我们看一下消费的代码
+```java
+/**
+ * @author zoubaitao
+ * date 2022/06/04
+ */
+@Service
+@Slf4j
+public class AlgorithmConsumerImpl implements AlgorithmConsumer {
 
+    private static final ThreadPoolExecutor THREAD_POOL = new ThreadPoolExecutor(Runtime.getRuntime().availableProcessors(),
+            Runtime.getRuntime().availableProcessors() * 2, 100,
+            TimeUnit.SECONDS, new SynchronousQueue<>(), new ThreadPoolExecutor.CallerRunsPolicy());
+
+    @KafkaListener(topics = {"concurrency"}, groupId = "concurrencyGroup", containerFactory = "containerFactory#concurrency")
+    @Override
+    public void processConcurrencyMsg(List<String> consumerRecords) {
+        log.error("start consumer topic:{}, message size:{}, message info:{}", "test", consumerRecords.size(), JacksonUtils.toString(consumerRecords));
+        for (String str : consumerRecords) {
+            THREAD_POOL.submit(() -> {
+                try {
+                    log.error("consumer topic:{}, message info:{}", "test", str);
+                    Thread.sleep(3000);
+                } catch (Exception ex) {
+                    log.error("consumer sleep error", ex);
+                }
+            });
+        }
+        log.error("end consumer topic:{}, message size:{}, message info:{}", "test", consumerRecords.size(), JacksonUtils.toString(consumerRecords));
+    }
+}
+```
+我们可以看到一个消息的耗时为3000ms，我们可以看看不同参数情况下是否会出现
+```bash
+consumer poll timeout has expired. This means the time between subsequent calls to poll() was longer than the configured max.poll.interval.ms, which typically implies that the poll loop is spending too much time processing messages. You can address this either by increasing max.poll.interval.ms or by reducing the maximum size of batches returned in poll() with max.poll.records.
+```
+
+|参数|是否提交失败|耗时|
+|:---:|:---:|:---:|
+|max.poll.records=1, max.poll.interval.ms=7000|否|3000|
+|max.poll.records=50, max.poll.interval.ms=7000|是|9375|
+|max.poll.records=100, max.poll.interval.ms=7000|是|18750|
+|max.poll.records=500, max.poll.interval.ms=7000|是|93750|
+
+这里就证明了，max.poll.records=500，那么这一次批量处理完成的时间为500/16 * 3000ms = 93750ms，这个耗时远大于我们的max.poll.interval.ms=7000ms，所以就会出现提交失败。
 ## 原生API-KafkaProducer
 1、这里使用原生的API来写数据，只设置Kafka集群地址，以及对应的序列化相关的数据
 ```java
@@ -412,3 +456,5 @@ public class KafkaProducerMain {
 [kafka系列七、kafka核心配置](https://www.cnblogs.com/wangzhuxing/p/10111831.html)
 
 [Kafka生产者ack机制剖析](https://jiamaoxiang.top/2020/07/05/Kafka%E7%94%9F%E4%BA%A7%E8%80%85ack%E6%9C%BA%E5%88%B6%E5%89%96%E6%9E%90/)
+
+[Kafka理论之Consumer Group & Coordinator](https://yhyr.github.io/2018/12/26/Kafka%E7%90%86%E8%AE%BA%E4%B9%8BConsumer-Group-Coordinator/)
