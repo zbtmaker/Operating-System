@@ -353,8 +353,62 @@ Caused by: org.apache.kafka.clients.consumer.CommitFailedException: Offset commi
 2022-07-10 12:23:36.443  INFO 3647 --- [ntainer#0-0-C-1] c.z.c.s.impl.AlgorithmConsumerImpl       : consumer topic:test, message:"9"
 ```
 
+## 原生API-KafkaProducer
+1、这里使用原生的API来写数据，只设置Kafka集群地址，以及对应的序列化相关的数据
+```java
+@Slf4j
+public class KafkaProducerMain {
+
+    public static void main(String[] args) {
+        test1();
+    }
+
+    private static void test1() {
+        Map<String, Object> properties = new HashMap<>();
+        properties.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9092,localhost:9093,localhost:9094");
+        properties.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.StringSerializer");
+        properties.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.StringSerializer");
+        KafkaProducer<String, String> kafkaProducer = new KafkaProducer<>(properties);
+        String topic = "test";
+        for (int i = 0; i < 10; i++) {
+            ProducerRecord<String, String> producerRecord = new ProducerRecord<>(topic, String.valueOf(i), String.valueOf(i));
+            kafkaProducer.send(producerRecord, new Callback() {
+                @Override
+                public void onCompletion(RecordMetadata recordMetadata, Exception e) {
+                    log.info("the recordMetadata::{}", recordMetadata.offset());
+                }
+            });
+        }
+        try {
+            Thread.sleep(1000);
+        } catch (Exception ex) {
+            log.error("thread sleep error,", ex);
+        }
+
+    }
+}
+```
+
+|配置项|解释|参考值|
+|:---:|:---:|:---:|
+|buffer.memory|||
+|linger.ms|||
+|batch.size|||
+|acks|||
+|retries|||
+|max.block.ms|||
+
+
+## 原生API-KafkaConsumer
+## 重平衡-Rebalance
 
 ## 参考文档
 [mac环境下使用brew安装Kafka(详细过程)](https://cloud.tencent.com/developer/article/1780636)
 
 [macOS上使用brew安装Kafka](https://qizhanming.com/blog/2021/01/05/how-to-install-kafka-on-macos-via-brew)
+
+[Kafka源码深度解析－序列7 －Consumer －coordinator协议与heartbeat实现原理](https://blog.csdn.net/chunlongyu/article/details/52791874)
+
+[kafka系列七、kafka核心配置](https://www.cnblogs.com/wangzhuxing/p/10111831.html)
+
+[Kafka生产者ack机制剖析](https://jiamaoxiang.top/2020/07/05/Kafka%E7%94%9F%E4%BA%A7%E8%80%85ack%E6%9C%BA%E5%88%B6%E5%89%96%E6%9E%90/)
