@@ -397,6 +397,30 @@ consumer poll timeout has expired. This means the time between subsequent calls 
 |max.poll.records=500, max.poll.interval.ms=7000|是|93750|
 
 这里就证明了，max.poll.records=500，那么这一次批量处理完成的时间为500/16 * 3000ms = 93750ms，这个耗时远大于我们的max.poll.interval.ms=7000ms，所以就会出现提交失败。
+
+## 重平衡-Rebalance
+什么时候会发生重平衡呢？有以下三种情况
+* Consumer数量发生变化，当Consumer < Partition数量时，此时如果如果新增一个Consumer，或一个Consumer离开了当前Consumer Group;
+* Partition数量发生变化，Kafka不允许Partition数量减少，当Partition数量增加时，Consumer Group会发起重平衡。
+* Topic数量增加为什么会导致Kafka的重平衡，这里的理由有点迷惑。
+
+Consumer离开Consumer Group怎么理解呢？
+* 要么是Consumer物理宕机，这个是真实的；
+* 网络中断了，Kafka通过两个参数判断一个Consumer是否网络中断了，heartbeat.interval.ms、 session.timeout.ms
+* 消费一个批次的消息时间过长导致Consumer Group认定Consumer已经宕机了，此时会提交失败，整个Consumer Group会进入到重平衡的一个对应的状态。和这个现象相关的两个参数是max.poll.records和max.poll.interval.ms。
+
+这里又引申出两个问题，
+* 当Consumer由于消费时间过长时，当提交对应的offset时，Consumer Group是如何告知Consumer提交失败且处于重平衡的。
+* 重平衡之后， Consumer是如何分配的。
+
+我们通过Consumer Group的状态变迁来展示为什么此时consume Group内所有的Consumer不会消费消息，
+Consumer的分配策略在重平衡和服务放第一次启动时分配策略一致，主要有以下几种：
+* RangeAssignor
+* RoundRobinAssignor
+* StickyAssignor
+
+
+
 ## 原生API-KafkaProducer
 1、这里使用原生的API来写数据，只设置Kafka集群地址，以及对应的序列化相关的数据
 ```java
@@ -433,6 +457,8 @@ public class KafkaProducerMain {
 }
 ```
 
+Kafka消息写入到Topic，是分区的，每一个分区的文件是由多个Segment构成，每一个Segment都由一个offset。
+
 |配置项|解释|参考值|
 |:---:|:---:|:---:|
 |buffer.memory|||
@@ -444,7 +470,7 @@ public class KafkaProducerMain {
 
 
 ## 原生API-KafkaConsumer
-## 重平衡-Rebalance
+
 
 ## 参考文档
 [mac环境下使用brew安装Kafka(详细过程)](https://cloud.tencent.com/developer/article/1780636)
@@ -458,3 +484,9 @@ public class KafkaProducerMain {
 [Kafka生产者ack机制剖析](https://jiamaoxiang.top/2020/07/05/Kafka%E7%94%9F%E4%BA%A7%E8%80%85ack%E6%9C%BA%E5%88%B6%E5%89%96%E6%9E%90/)
 
 [Kafka理论之Consumer Group & Coordinator](https://yhyr.github.io/2018/12/26/Kafka%E7%90%86%E8%AE%BA%E4%B9%8BConsumer-Group-Coordinator/)
+
+[Kafka参数调优实战，看这篇文章就够了！](https://juejin.cn/post/6844903844778868750)
+
+[深度剖析 Kafka Producer 的缓冲池机制](https://mp.weixin.qq.com/s?__biz=MzU3MjQ1ODcwNQ==&mid=2247485704&idx=1&sn=8bef9aae50799b688d33e6597064d88a&scene=21#wechat_redirect)
+
+[Kafka 顺序消费线程模型的实践与优化](https://mp.weixin.qq.com/s?__biz=MzU3MjQ1ODcwNQ==&mid=2247485922&idx=1&sn=966e9dcf4b32125c6a517b160e68e02d&scene=21#wechat_redirect)
