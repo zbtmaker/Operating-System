@@ -470,8 +470,111 @@ Kafka消息写入到Topic，是分区的，每一个分区的文件是由多个S
 
 
 ## Kafka 生产者参数
+关于buffer.memory这个参数的解答，我们的数据首先是放在缓冲池里面，
+* 那么这个缓冲池的结构是什么样子的？
+* 我们如何知道消费的速度，消费的方式是怎样的，是单线程消费还是多线程消费呢？
+* 如果我们写入的数据是在缓冲池里面，那么我们如果future.get()同步等待结果是不是很慢呢？
+* 根据上一步提出的问题，我们什么场景应该使用同步写入，什么时候应该使用异步写入呢？
+* 如果我们设置的buffer.memory特别大，生产者是单线程写入的，此时又因为同步等待结果什么时候开始发送呢？
 
-## Kafka 消费这参数
+根据上面最后一个问题，如果我们的buffer.memory设置的特别大， 我们设置缓冲池的目的本身就是为了减少生产者和Broker之间的网络IO。那么sender线程是如何消费缓冲池里面的消息的呢？这里有一个batch.size、linger.ms应该是为了配合buffer.memory的。
+* batch.size：如果生产者写入的消息量达到了batch.size配置的值，比方说1024Byte，那么此时sender线程就会开始向broker多条消息通过打包的方式一次性传递过去。我们前面有一个疑问，如果producer是单线程且是同步写入的（将消息写入到缓冲池后会同步等待结果）,那么因为一个producer一次生产的消息无法满足batch.size的要求，那么这个时候是不是就不发送了，让producer这个生产者一直等待呢？
+* linger.ms：为了解决上面因为batch.size配置的值过大，导致单线程同步写入一直阻塞的问题，Kafka的设计者通过配置linger.ms这个参数来解决问题，linger.ms表示Kafka会记录首次向缓冲池写入数据的时间，如果过了10ms（假如linger.ms=10），这个batch.size还是没有满足，此时sender线程也会将缓冲池中的消息发送给broker。
+
+那么我们根据上面的猜测来写一个测试用例验证一下我们的猜想。
+```java
+package kafka;
+
+import junit.framework.TestCase;
+import lombok.extern.slf4j.Slf4j;
+import org.apache.kafka.clients.producer.*;
+
+import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.Future;
+
+/**
+ * @author zoubaitao
+ * date 2022/08/12
+ */
+@Slf4j
+public class KafkaProducerTest extends TestCase {
+
+    public void testBatchSize() {
+        Map<String, Object> properties = new HashMap<>();
+        properties.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9092,localhost:9093,localhost:9094");
+        properties.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.StringSerializer");
+        properties.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.StringSerializer");
+        // 大约100KB
+        properties.put(ProducerConfig.BATCH_SIZE_CONFIG, "100000");
+
+        // 如果10秒内还没有写满100KBSender线程就发送消息至Broker
+        properties.put(ProducerConfig.LINGER_MS_CONFIG, "10000");
+        KafkaProducer<String, String> kafkaProducer = new KafkaProducer<>(properties);
+        String topic = "test";
+        for (int i = 0; i < 10; i++) {
+            long startTimer = System.currentTimeMillis();
+            log.info("start send ::{}th message", i);
+            ProducerRecord<String, String> producerRecord = new ProducerRecord<>(topic, String.valueOf(i), String.valueOf(i));
+            Future<RecordMetadata> future = kafkaProducer.send(producerRecord, (recordMetadata, e) -> log.info("the recordMetadata::{}", recordMetadata.offset()));
+            try {
+                RecordMetadata recordMetadata = future.get();
+                log.info("receive message from send ::{}th message which cost time::{}", i, System.currentTimeMillis() - startTimer);
+                if (recordMetadata == null) {
+                    log.error("wait kafka send message result is null");
+                }
+            } catch (Exception ex) {
+                log.error("wait kafka send message result error", ex);
+            }
+
+        }
+        try {
+            Thread.sleep(5000);
+        } catch (Exception ex) {
+            log.error("thread sleep error,", ex);
+        }
+    }
+}
+```
+
+我们来看一下日志打印
+```bash
+23:53:02.104 [main] INFO kafka.KafkaProducerTest - start send ::1th message
+23:53:12.105 [kafka-producer-network-thread | producer-1] DEBUG org.apache.kafka.clients.NetworkClient - [Producer clientId=producer-1] Sending PRODUCE request with header RequestHeader(apiKey=PRODUCE, apiVersion=9, clientId=producer-1, correlationId=4) and timeout 30000 to node 0: {acks=-1,timeout=30000,partitionSizes=[test-3=70]}
+23:53:12.109 [kafka-producer-network-thread | producer-1] DEBUG org.apache.kafka.clients.NetworkClient - [Producer clientId=producer-1] Received PRODUCE response from node 0 for request with header RequestHeader(apiKey=PRODUCE, apiVersion=9, clientId=producer-1, correlationId=4): ProduceResponseData(responses=[TopicProduceResponse(name='test', partitionResponses=[PartitionProduceResponse(index=3, errorCode=0, baseOffset=1558, logAppendTimeMs=-1, logStartOffset=1547, recordErrors=[], errorMessage=null)])], throttleTimeMs=0)
+23:53:12.109 [kafka-producer-network-thread | producer-1] INFO kafka.KafkaProducerTest - the recordMetadata::1558
+23:53:12.109 [main] INFO kafka.KafkaProducerTest - receive message from send ::1th message which cost time::10005
+23:53:12.109 [main] INFO kafka.KafkaProducerTest - start send ::2th message
+23:53:22.110 [kafka-producer-network-thread | producer-1] DEBUG org.apache.kafka.clients.NetworkClient - [Producer clientId=producer-1] Sending PRODUCE request with header RequestHeader(apiKey=PRODUCE, apiVersion=9, clientId=producer-1, correlationId=5) and timeout 30000 to node 0: {acks=-1,timeout=30000,partitionSizes=[test-0=70]}
+23:53:22.113 [kafka-producer-network-thread | producer-1] DEBUG org.apache.kafka.clients.NetworkClient - [Producer clientId=producer-1] Received PRODUCE response from node 0 for request with header RequestHeader(apiKey=PRODUCE, apiVersion=9, clientId=producer-1, correlationId=5): ProduceResponseData(responses=[TopicProduceResponse(name='test', partitionResponses=[PartitionProduceResponse(index=0, errorCode=0, baseOffset=3284, logAppendTimeMs=-1, logStartOffset=3277, recordErrors=[], errorMessage=null)])], throttleTimeMs=0)
+23:53:22.113 [kafka-producer-network-thread | producer-1] INFO kafka.KafkaProducerTest - the recordMetadata::3284
+23:53:22.114 [main] INFO kafka.KafkaProducerTest - receive message from send ::2th message which cost time::10005
+```
+## Kafka 消费者参数
+### Kafka原生消费方式
+这里有个很好奇的事情，Kafka出现并发消费一个offset的情况，假如，是不是一个offset只有提交了，Consumer Coordinate才会修改对应的offset的位置，这里其实也不会出现并发提交offset的情况，因为每个partition都只有一个Consumer消费，所以一个Consumer在消费前必然是奖上一次消费的数据提交了，否则没有办法进行下一次消费。
+### Kafka原生提交offset方式
+### Spring Kafka消费方式
+### Spring Kafka提交offset方式
+针对Spring Kafka的几种提交模式这里有点疑问，Spring Kafka的源码中有这样一个配置
+```java
+	private AckMode ackMode = AckMode.BATCH;
+
+	/**
+	 * The number of outstanding record count after which offsets should be
+	 * committed when {@link AckMode#COUNT} or {@link AckMode#COUNT_TIME} is being
+	 * used.
+	 */
+	private int ackCount = 1;
+
+	/**
+	 * The time (ms) after which outstanding offsets should be committed when
+	 * {@link AckMode#TIME} or {@link AckMode#COUNT_TIME} is being used. Should be
+	 * larger than
+	 */
+	private long ackTime = DEFAULT_ACK_TIME;
+```
+从这几个配置可以看到Spring的消费其实采用的默认提交方式是AckMode.BATCH方式，也就是当这一个批次全部消费完成之后就会全部提交，但是这个批量提交是指我的max.poll.records=100，将这100个全部消费完成之后一次性提交还是说怎样。也就是说我这边如果设置了enable.auto.commit=false，那么就会出现Spring Kafka帮我们去提交，而不需要我们在代码中写提交方式。这里明天需要写个案例去讨论这一块。
 
 
 
@@ -493,3 +596,5 @@ Kafka消息写入到Topic，是分区的，每一个分区的文件是由多个S
 [深度剖析 Kafka Producer 的缓冲池机制](https://mp.weixin.qq.com/s?__biz=MzU3MjQ1ODcwNQ==&mid=2247485704&idx=1&sn=8bef9aae50799b688d33e6597064d88a&scene=21#wechat_redirect)
 
 [Kafka 顺序消费线程模型的实践与优化](https://mp.weixin.qq.com/s?__biz=MzU3MjQ1ODcwNQ==&mid=2247485922&idx=1&sn=966e9dcf4b32125c6a517b160e68e02d&scene=21#wechat_redirect)
+
+[Kafka 源码解析之 Consumer Poll 模型（七）](https://matt33.com/2017/11/11/consumer-pollonce/)
