@@ -1,6 +1,6 @@
 # 一、ReentrantLock源码解读
 
-非公平锁获取锁流程
+## 非公平锁获取锁流程
 ```java
     final void lock() {
         if (compareAndSetState(0, 1))
@@ -103,7 +103,7 @@
                     failed = false;
                     return interrupted;
                 }
-                // 
+                // 判断前一个节点的状态，然后决定是否要暂停当前线程，同时判断当前线程是否要中断。
                 if (shouldParkAfterFailedAcquire(p, node) &&
                     parkAndCheckInterrupt())
                     interrupted = true;
@@ -114,3 +114,131 @@
         }
     }
 ```
+这里我们可以看到，当一个节点进入队列之后，还是会不断的运行for循环，在这个循环过程中：
+* 如果当前线程的头节点是Head，因为等待的线程在入队列时会进入队列时会创建一个空的头节点，如果说node的头节点是一个Head节点，那么表示在等待队列的线程只有当前线程了，因此需要奖当前节点设置成头节点，同时返回false
+* 如果上面失败了，那么需要调用shouldParkAfterFailedAcquire方法判断这个节点是否需要调用park方法来暂停这个线程的执行。
+
+
+我们来看一下shouldParkAfterFailedAcquire方法和parkAndCheckInterrupt方法做了什么。
+```java
+    private static boolean shouldParkAfterFailedAcquire(Node pred, Node node) {
+        int ws = pred.waitStatus;
+        // 如果线程所在节点的前一个节点的处于single状态，那么表明当前线程的需要被暂停，
+        // 这样就不需要在上面acquireQueue方法中一直进入for循环，如果被暂停了，此时CPU
+        // 应该就不需要分配时间片给当前线程来无限的空转。
+        if (ws == Node.SIGNAL)
+            /*
+             * This node has already set status asking a release
+             * to signal it, so it can safely park.
+             */
+            return true;
+        // 如果当前线程所在节点的状态处于取消状态，那么就需要将节点node与pred的
+        // predecessor节点进行关联，直到这个节点node关联的前驱节点不再是取消状态
+        // 这里有意思的是为什么这个节点在关联前驱节点为什么没有判断前驱节点是否是null呢
+        if (ws > 0) {
+            /*
+             * Predecessor was cancelled. Skip over predecessors and
+             * indicate retry.
+             */
+            do {
+                node.prev = pred = pred.prev;
+            } while (pred.waitStatus > 0);
+            pred.next = node;
+        } else {
+            // 如果pred节点的状态不是SIGNAL、CANCEL状态，尝试将前一个节点设置成SIGNAL状态？
+            /*
+             * waitStatus must be 0 or PROPAGATE.  Indicate that we
+             * need a signal, but don't park yet.  Caller will need to
+             * retry to make sure it cannot acquire before parking.
+             */
+            compareAndSetWaitStatus(pred, ws, Node.SIGNAL);
+        }
+        return false;
+    }
+```
+
+* 这里首先判断pred节点的状态是否是SIGNAL，如果前一个节点是SIGNAL状态，那么node节点也应就应该进入暂停状态；
+* 如果node的前驱节点pred的状态>0，也就是说CANCEL状态，此时就需要将node节点关联到前面状态不为CANCEL的前驱节点；
+* 如果pred节点的状态既不是SIGNAL，也不是CANCEL状态，那么就需要将pred节点的状态设置成SIGNAL状态？
+
+因为pred节点是SIGNAL状态，所以这个节点就需要调用parkAndCheckInterrupt方法来暂停线程。
+```java
+    private final boolean parkAndCheckInterrupt() {
+        // park线程，其实就是暂停当前线程
+        LockSupport.park(this);
+        // 判断当前线程是否已经被中断了
+        return Thread.interrupted();
+    }
+```
+
+## 非公平锁释放流程
+
+
+```java
+    public void unlock() {
+        sync.release(1);
+    }
+    public final boolean release(int arg) {
+        if (tryRelease(arg)) {
+            Node h = head;
+            if (h != null && h.waitStatus != 0)
+                unparkSuccessor(h);
+            return true;
+        }
+        return false;
+    }
+```
+我们首先看一下tryRelease方法
+```java
+
+    protected final boolean tryRelease(int releases) {
+        // 首先把获取锁的次数-1
+        int c = getState() - releases;
+        if (Thread.currentThread() != getExclusiveOwnerThread())
+            throw new IllegalMonitorStateException();
+        boolean free = false;
+        // 如果获取锁的次数已经为0了，表示这个线程已经完全释放线程了，此时将线程独占标识符去掉
+        if (c == 0) {
+            free = true;
+            setExclusiveOwnerThread(null);
+        }
+        // 设置状态，这里为什么最后才设置状态呢？是因为防止其他线程在获取锁的时候提前获取到state值，从而出现不一致性
+        setState(c);
+        return free;
+    }
+```
+* 首先把持有线程的次数state；
+* 然后判断次有线程的数量c是否为零，如果为零，则说明当前线程已经完全释放完线程了，将独占线程的标识设置为null，这样就能够让其他线程在竞争锁时设置为独占线程；
+* 最后将state回写到内存中，这样就能够让其他线程在竞争线程成功时确保上一个线程已经完全释放线程了。
+
+我们接下来看一下unparkSuccessor方法
+```java
+    private void unparkSuccessor(Node node) {
+        /*
+         * If status is negative (i.e., possibly needing signal) try
+         * to clear in anticipation of signalling.  It is OK if this
+         * fails or if status is changed by waiting thread.
+         */
+        int ws = node.waitStatus;
+        if (ws < 0)
+            compareAndSetWaitStatus(node, ws, 0);
+
+        /*
+         * Thread to unpark is held in successor, which is normally
+         * just the next node.  But if cancelled or apparently null,
+         * traverse backwards from tail to find the actual
+         * non-cancelled successor.
+         */
+        Node s = node.next;
+        if (s == null || s.waitStatus > 0) {
+            s = null;
+            for (Node t = tail; t != null && t != node; t = t.prev)
+                if (t.waitStatus <= 0)
+                    s = t;
+        }
+        if (s != null)
+            LockSupport.unpark(s.thread);
+    }
+```
+
+
