@@ -241,4 +241,205 @@
     }
 ```
 
+这里的逻辑还是比较简单，
+* 如果当前节点的状态<0，那么将node的状态设置为0，也就是初始状态；
+* 如果ws>=0，其实这里应该是从node节点找到第一个状态节点<0的节点；
+* 找到满足条件的节点，然后将节点唤醒。
+
+
+## Condition
+
+### await-加入等待队列
+```java
+    public final void await() throws InterruptedException {
+        if (Thread.interrupted())
+            throw new InterruptedException();
+        // 将节点添加到等待节点队列中
+        Node node = addConditionWaiter();
+        // 因为将其余等待的节点释放
+        int savedState = fullyRelease(node);
+        int interruptMode = 0;
+        // 如果节点在同步队列当中，那么就不需要将当前线程执行park了
+        while (!isOnSyncQueue(node)) {
+            LockSupport.park(this);
+            if ((interruptMode = checkInterruptWhileWaiting(node)) != 0)
+                break;
+        }
+        // 这个调用的是外部类的方法
+        if (acquireQueued(node, savedState) && interruptMode != THROW_IE)
+            interruptMode = REINTERRUPT;
+        if (node.nextWaiter != null) // clean up if cancelled
+            unlinkCancelledWaiters();
+        if (interruptMode != 0)
+            reportInterruptAfterWait(interruptMode);
+    }
+    /**
+     * 首先判断节点的状态是否是CONDITION，活着这个节点的前驱节点为null，那么表示这个节点是只存在等待队列中，此时将节点
+     * 如果node.next不等于null，说明节点已经在同步队列当中，如果这个节点是同步队列的尾节点，那么就需要从同步队列的尾节点
+     * 开始遍历，直到在同步队列中找到一个节点与node节点相等。还是很好奇，在什么条件下，一个节点即在同步队列中，又会在等待
+     * 等待队列当中。
+     */
+    final boolean isOnSyncQueue(Node node) {
+        // 如果没有其他线程执行signal方法，那么当前线程所在的节点的状态都是CONDITION状态，如果其他线程调用了signal方法，会将等待队列中的
+        // 那么此时就会返回true。
+        if (node.waitStatus == Node.CONDITION || node.prev == null)
+            return false;
+        if (node.next != null) // If has successor, it must be on queue
+            return true;
+        /*
+         * node.prev can be non-null, but not yet on queue because
+         * the CAS to place it on queue can fail. So we have to
+         * traverse from tail to make sure it actually made it.  It
+         * will always be near the tail in calls to this method, and
+         * unless the CAS failed (which is unlikely), it will be
+         * there, so we hardly ever traverse much.
+         */
+        return findNodeFromTail(node);
+    }
+
+    private int checkInterruptWhileWaiting(Node node) {
+        return Thread.interrupted() ? (transferAfterCancelledWait(node) ? THROW_IE : REINTERRUPT) :0;
+    }
+
+    final boolean transferAfterCancelledWait(Node node) {
+        if (compareAndSetWaitStatus(node, Node.CONDITION, 0)) {
+            enq(node);
+            return true;
+        }
+        /*
+         * If we lost out to a signal(), then we can't proceed
+         * until it finishes its enq().  Cancelling during an
+         * incomplete transfer is both rare and transient, so just
+         * spin.
+         */
+        while (!isOnSyncQueue(node))
+            Thread.yield();
+        return false;
+    }
+
+    final boolean acquireQueued(final Node node, int arg) {
+        boolean failed = true;
+        try {
+            boolean interrupted = false;
+            for (;;) {
+                final Node p = node.predecessor();
+                if (p == head && tryAcquire(arg)) {
+                    setHead(node);
+                    p.next = null; // help GC
+                    failed = false;
+                    return interrupted;
+                }
+                if (shouldParkAfterFailedAcquire(p, node) &&
+                    parkAndCheckInterrupt())
+                    interrupted = true;
+            }
+        } finally {
+            if (failed)
+                cancelAcquire(node);
+        }
+    }
+
+    private static boolean shouldParkAfterFailedAcquire(Node pred, Node node) {
+        int ws = pred.waitStatus;
+        if (ws == Node.SIGNAL)
+            /*
+             * This node has already set status asking a release
+             * to signal it, so it can safely park.
+             */
+            return true;
+        if (ws > 0) {
+            /*
+             * Predecessor was cancelled. Skip over predecessors and
+             * indicate retry.
+             */
+            do {
+                node.prev = pred = pred.prev;
+            } while (pred.waitStatus > 0);
+            pred.next = node;
+        } else {
+            /*
+             * waitStatus must be 0 or PROPAGATE.  Indicate that we
+             * need a signal, but don't park yet.  Caller will need to
+             * retry to make sure it cannot acquire before parking.
+             */
+            compareAndSetWaitStatus(pred, ws, Node.SIGNAL);
+        }
+        return false;
+    }
+```
+
+* 这里首先将当前线程构建一个Node添加到等待队列中（注意这个等待队列和执行lock操作的同步队列不是同一个队列）。等待队列的节点的状态为CONDITION，而同步队列中节点状态为CANCEl、SIGNAL。等待队列为单向链表，使用nextWaiter连接，而同步队列中的节点通过prev和next两个指针连接是一个双向的链表。
+* 因为当前线程调用的lock.Condition的wait方法，说明当前线程已经要放弃锁的占有，此时会调用fullyRelease方法将线程之前占有锁的次数全部清零，同时把线程独占的引用给释放。这里也有一个问题，如果这个线程因为重入的原因多次持有锁，那么当线程获取到锁以后，回到上一次执行的地方，那是不是在上一个方法栈需要重新获取锁。
+* 然后判断当前线程是否在同步队列当中，前面我们知道等待队列和同步队列可以通过waitStatus和是否是单向链表来判断，因此如果一个这个节点的状态是CONDITION状态，那么这个节点肯定不在同步队列，或者这个节点的前驱节点prev==null说明这个节点处在单向链表中，那么这个节点就不在同步队列当中，反之，则在同步队列中。
+* 因为这个节点已经添加到等待队列节点当中，那么这个节点就需要重新调用acquireQueue方法来重新进入同步队列当中。
+
+### signal-移除等待队列
+
+
+```java
+    public final void signal() {
+        // 如果当前线程没有获取锁就执行signal方法就会报异常
+        if (!isHeldExclusively())
+            throw new IllegalMonitorStateException();
+        Node first = firstWaiter;
+        if (first != null)
+            // 将首从等待队列中移除
+            doSignal(first);
+    }
+```
+
+```java
+    // 更新首节点尾当前节点的下一个节点，同时唤醒当前节点
+    private void doSignal(Node first) {
+        do {
+            // 更新等待队列的首节点，同时，如果first节点的下一个节点是null节点，那么说明first节点即是首节点，又是尾节点，因此将尾节点置空
+            if ( (firstWaiter = first.nextWaiter) == null)
+                lastWaiter = null;
+            // 将first节点与等待队列断开
+            first.nextWaiter = null;
+        } while (!transferForSignal(first) && (first = firstWaiter) != null);
+    }
+```
+执行唤醒操作
+```java
+    /**
+     * 其实这个方法只有signal和signalAll两个方法使用，那么这个方法肯定是线程安全的，因为调用这个方法都需要获取锁的独占权
+     */
+    final boolean transferForSignal(Node node) {
+        // 如果节点设置失败，那么表示这个节点已经被取消了，在调用signal活着signalAll这个操作之前已经执行了
+        // CANCEL操作（中断或者执行超时），那么就返回false，然后让主流程唤醒下一个节点，将节点的状态设置为初始状态
+        if (!compareAndSetWaitStatus(node, Node.CONDITION, 0))
+            return false;
+            
+        // 然后将之前在等待队列首节点的然后将节点添加到同步队列中，返回当前节点的前一个节点
+        Node p = enq(node);
+        int ws = p.waitStatus;
+        // 如果节点p的状态既不是ws>0(CANCEL状态)，那么节点P的状态就可以被设置为SINGAL状态，如果设置失败，为什么会设置失败呢？因为这个时候，已经没有其
+        // 他线程可以操作了，如果前一个节点是HEAD节点活着在做这个操作之前（前一个线程在执行的时候执行了中断或者超时）,但是如果这个节点是头节点的话，又该
+        // 如何呢？
+        // 
+        if (ws > 0 || !compareAndSetWaitStatus(p, ws, Node.SIGNAL))
+            LockSupport.unpark(node.thread);
+        return true;
+    }
+    /**
+     *
+     */
+    private Node enq(final Node node) {
+        for (;;) {
+            Node t = tail;
+            if (t == null) { // Must initialize
+                if (compareAndSetHead(new Node()))
+                    tail = head;
+            } else {
+                node.prev = t;
+                if (compareAndSetTail(t, node)) {
+                    t.next = node;
+                    return t;
+                }
+            }
+        }
+    }
+```
+首先我们看到，如果一个线程在获取锁之后执行了signal方法是没有放弃锁的。如果当前线程没有放弃锁，那么其他线程是不可能调用lock成功（也就是说其他线程会进入同步队列），同时也不会有线程调用了await方法（这个）
 
