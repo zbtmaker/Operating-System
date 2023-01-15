@@ -7,8 +7,7 @@
 * 如果我们写入的数据是在缓冲池里面，那么我们如果future.get()同步等待结果是不是很慢呢？
 * 根据上一步提出的问题，我们什么场景应该使用同步写入，什么时候应该使用异步写入呢？
 * 如果我们设置的buffer.memory特别大，生产者是单线程写入的，此时又因为同步等待结果什么时候开始发送呢？
-
-根据上面最后一个问题，如果我们的buffer.memory设置的特别大， 我们设置缓冲池的目的本身就是为了减少生产者和Broker之间的网络IO。那么sender线程是如何消费缓冲池里面的消息的呢？这里有一个batch.size、linger.ms应该是为了配合buffer.memory的。
+### batch.size和linger.ms
 * batch.size：如果生产者写入的消息量达到了batch.size配置的值，比方说1024Byte，那么此时sender线程就会开始向broker多条消息通过打包的方式一次性传递过去。我们前面有一个疑问，如果producer是单线程且是同步写入的（将消息写入到缓冲池后会同步等待结果）,那么因为一个producer一次生产的消息无法满足batch.size的要求，那么这个时候是不是就不发送了，让producer这个生产者一直等待呢？
 * linger.ms：为了解决上面因为batch.size配置的值过大，导致单线程同步写入一直阻塞的问题，Kafka的设计者通过配置linger.ms这个参数来解决问题，linger.ms表示Kafka会记录首次向缓冲池写入数据的时间，如果过了10ms（假如linger.ms=10），这个batch.size还是没有满足，此时sender线程也会将缓冲池中的消息发送给broker。
 
@@ -81,6 +80,7 @@ public class KafkaProducerTest extends TestCase {
 23:53:22.113 [kafka-producer-network-thread | producer-1] INFO kafka.KafkaProducerTest - the recordMetadata::3284
 23:53:22.114 [main] INFO kafka.KafkaProducerTest - receive message from send ::2th message which cost time::10005
 ```
+从上面的日志可以看到，如果发送消息的日志打印时间是23:53:02.104，但是因为我们设置的batch.size=1000000（也就是100KB左右），然后我们每次发送的消息不足100KB，因此这个需要等待缓冲池满，因此Kafka提供了另一个参数linger.ms，通过这个参数，如果缓冲池在一段时间，发送的数据无法满足缓冲池的大小，那么Kafka发送端会根据第一次收到消息开始计时，如果在linger.ms指定的时间内，发送的消息无法填满缓冲池，则会直接发送消息。
 
 我们继续来解答batch这个参数的问题，当producer写入数据时，这个batch.size是针对所有同一个topic的所有partition而言，还是针对单个partition而言呢？我想这个应该是针对单个partition而言的。我们可以看一下源码
 ```java
@@ -306,13 +306,10 @@ public RecordAppendResult append(TopicPartition tp,
         }
     }
 ```
-
-
-这里又引入了另一个参数max.request.bytes的使用，如果我们要往Kafka中写消息，其实受两个参数的限制，因为Kafka 的broker在启动时会夹在其server.properties文件中的配置项，这个配置向是说如果一条消息来了之后会如果之前的segment文件无法存储，会创建一个1073741824byte（1GB）大小的文件用于重新存储文件。如果我们一条消息的文件大于这个参数，那么会报异常，但是通常我们一条消息不回有这么大，因此不用担心。
-```bash
-log.segment.bytes=1073741824
-```
-Kafka为了不让生产者创建一个大的消息然后在网络上传输，因此增加了max.request.bytes这个参数做限制，如果消息的大小超出了这个大小，就会在发送消息时报异常。
+### buffer.memory和max.block.ms
+消息写入到Kafka的服务器之前会在消息生产者的客户端给不同的分区申请batch.size大小的缓冲区，如果缓冲区较小，申请的batch.size也会受限。默认的batch.size的大小是16KB，而默认的buffer.memory的默认大小为32MB。我们这里使用多线程往Kafka里写数据看看什么时
+### max.request.bytes
+这里又引入了另一个参数max.request.bytes的使用，如果我们要往Kafka中写消息，如果我们要写入的一条消息的大小超出了max.request.bytes的大小，在发送消息时会报异常。因此，在发送消息之前，我们需要衡量发送单条消息的最大消息的大小。
 ```java
 public class KafkaProducerTest extends TestCase {
 
