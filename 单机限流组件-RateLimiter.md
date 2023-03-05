@@ -427,5 +427,5 @@ public class RateLimiterTest extends TestCase {
 10:46:59.911 [main] INFO com.zbt.ratelimiter.SmoothRateLimiter - execute reserveEarliestAvailable method, lastFreeTicketMicros::11691, nextFreeTicketMicros::200367, waitMicros::188676
 10:46:59.911 [main] INFO ratelimiter.RateLimiterTest - get 2 permit cost:0.0, storedPermits::0.0, nextFreeTicketMicros::200367 
 10:46:59.911 [main] INFO com.zbt.ratelimiter.SmoothRateLimiter - execute reserveEarliestAvailable method, lastFreeTicketMicros::200367, nextFreeTicketMicros::600367, waitMicros::400000
-10:47:00.098 [main] INFO ratelimiter.RateLimiterTest - get 4 permit cost:0.185836, storedPermits::0.0, nextFreeTicketMicros::600367 
+10:47:00.098 [main] INFO ratelimiter.RateLimiterTest - get 4 permit cost:0.185836, storedPermits::0.0, nextFreeTicketMicros::600367 a
 ```
