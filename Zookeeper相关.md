@@ -5,7 +5,7 @@
 #### zookeeper Server启动
 
 ```bash
-zoubaitao@zoubaitaodeMacBook-Pro ~ % zkServer start
+MacBook-Pro ~ % zkServer start
 ZooKeeper JMX enabled by default
 Using config: /usr/local/etc/zookeeper/zoo.cfg
 Starting zookeeper ... STARTED
@@ -13,7 +13,7 @@ Starting zookeeper ... STARTED
 
 #### zookeeper Client启动
 ```bash
-zoubaitao@zoubaitaodeMacBook-Pro ~ % zkCli
+MacBook-Pro ~ % zkCli
 Connecting to localhost:2181
 Welcome to ZooKeeper!
 JLine support is enabled
@@ -26,7 +26,7 @@ WatchedEvent state:SyncConnected type:None path:null
 #### zookeeper Server关闭
 
 ```bash
-zoubaitao@zoubaitaodeMacBook-Pro zookeeper % zkServer stop
+MacBook-Pro zookeeper % zkServer stop
 ZooKeeper JMX enabled by default
 Using config: /usr/local/etc/zookeeper/zoo.cfg
 Stopping zookeeper ... /usr/local/Cellar/zookeeper/3.7.0_1/libexec/bin/zkServer.sh: line 219: kill: (15158) - No such process
