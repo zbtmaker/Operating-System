@@ -1,13 +1,14 @@
-# 分布式学习
+# Raft论文笔记
 <!-- TOC -->
 
-- [分布式学习](#分布式学习)
+- [Raft论文笔记](#raft论文笔记)
   - [一、选举 - Leader](#一选举---leader)
   - [二、复制 - Replicate](#二复制---replicate)
   - [三、安全 - Safety](#三安全---safety)
   - [四、集群成员变化](#四集群成员变化)
   - [五、Log压缩](#五log压缩)
   - [五、Client请求](#五client请求)
+  - [TODO List](#todo-list)
   - [学习资料](#学习资料)
 
 <!-- /TOC -->
@@ -43,27 +44,37 @@ Raft主要关注的三个方面，
   
   选举四答：如果一个Candidate能够在集群中的同一个term的选举中获得大部分的Server的投票，那么这个Candidate就能够称为一个Leader。这里Follower如何给一个Candidate投票，可以在阅读了后main的内容之后再来回答这个问题。读了3.6Safety这一章节之后可以来回答了，比方说：
 
-* 选举二问：当选举中是否会出现多个Leader（即分布式中著名的拜占庭将军问题），同时多个Leader是否最终能够由一个Leader来统领。Raft算法是如何解决词问题的。
-
-* 选举三问：当一个Candidate成为了Leader之后，那么其他的Candidate是如何确认了自己的Follower身份的。
+* 选举五问：如果一个Leader在规定的时间没有给用户发送心跳检测，那么这个Server会立即提升自己的term，也就是 Follower认为Leader已经挂掉了，Follower的状态会转换成Candidate，此时 $Candidate_{term} > Leader_{term}$。如果Candidate在选举过程中， Leader的网络状况没问题了，或者说Leader从宕机中重启了。Leader此时的状态应该发生什么变化，依旧可以认为自己是Leader还是转换成为Follower角色。
+  * 这个问题和前面的选举三问中的问题一样，在选举过程中有一个很重要的点来判断一个Server的状态发生转换的就是一旦自己的term比其他Server的term要小，那么一定会从当前状态转换成Follower状态。
   
-* 选举X问：我们提到一台Server在其 timeout时间内没有收到Leader发送过来的心跳检测就会自动转换成为一个Candidate角色，那么这个Server的timeout是如何合理决定的呢？
+  * 因为Candidate的term应比上一轮的Leader的term要大，因此Candidate接受到Leader发送出去的AppendEntry RPC不做任何处理或者是返回失败码，同时告诉Leader已经在选举了。
+  
+  
+* 选举六问：这个问题紧接着选举五问。集群中可能会出现同时存在Candidate选举和Leader执行log复制的现象。针对这种现象，Follower应该如何处理呢？我们假设两种情况。
+  * case1：Follower的在没有收到Candidate之前，已经收到了Leader的AppendEtnry RPC 的情况下会出现集群中一部分的Server在复制旧的Leader的log，同时一部分Server在进行一部分选举，然后这部分Server在随后又收到了。
+  * case2：Follower在接受到原来的Leader之前已经收到了Candidate的选举请求了，那么Follower会怎么做呢？**在Raft中有一个原则就是，服务器之间通信会互相交换term，如果其他Server的term比自己的大，那么会把自己的term升级到新的term，如果Candidate和Leader发现自己的term已经过时了，那么Candidate和Leader的状态转变成为 Follower**。有了这个原则，看一下Follower先收到Candidate的选举请求，此时 $Follower_{term} < Candidate_{term}$，因此Follower会升级自己的term，然后给这个Candidate投上一票。紧接着 Leader发起了Append Entries RPC，此时Follower发现$Follower_{term} > Leader_{term}$。那么此时Follower会忽略这个请求呢？还是会告诉Leader自己的term已经比他大了，Leader需要更改自己的状态为Follower还是说Leader要等到Candidate给Leader发送投票请求的时候Leader才将自己的状态转换成 Follower同时升级自己的term。这个问题我们留在下一个问题来解答。
 
-* 选举四问：选举中Candidate发出的请求和选举完成之后发出的心跳保活请求是否是同一个类型，那么Candidate和Follower角色的Server是如何做出区分的，同时又是如何回应的。
+* 选举七问：Leader在集群选举的同时给其他Follower和Candidate同时发去了AppendEntries RPC请求，请问此时其他Server应该如何响应。看一下论文里面有没有？
+  * 在Raft 博士论文当中的Figure 3.1中明确指出了如果一个Follower在收到Leader的AppendEntries RPC请求，此时如果$Server_{term} > Leader_{term}$，此处用Server代替Follower和Candidate，此时Server 会返回自己的term，Leader发现自己的term已经过时了，因此会更新自己的term，同时因为此时这个Leader已经不再是Leader了，因此状态转换成Follower状态。
+  
 
-* 选举五问：选举中Candidate发出的请求和选举完成之后发出的心跳保活请求是否是同一个类型，那么Candidate和Follower角色的Server是如何做出区分的，同时又是如何回应的。
+* 选举八问：当选举中是否会出现多个Leader（即分布式中著名的拜占庭将军问题），同时多个Leader是否最终能够由一个Leader来统领，Raft算法是如何解决词问题的。
+  * 每个Follower都有自己的election timeout，而且这个每一个follower的election timeout的时间范围为[150,300]ms。那么这里就会出现150个不同的election timeout，如果时间更精确一点的话，可以有有无数的election timeout。
 
-  选举五答：在Raft的原文中提到了两种Rpc，一种是RequestVote主要是在当一个集群中的Follower无法感知到Leader时，此时Follower的角色就会转换成Candidate，此时就会使用RequestVote类型的Rpc与集群中其他Server进行通信。这个通信的目的是让其他 Follower知道自己已经是Candidate，投自己一票。还有一种是Entries Rpc，这种Rpc请求的方式就是Server将自己的log同步给Follower。
+* 选举八问：选举中Candidate发出的请求和选举完成之后发出的心跳保活请求是否是同一个类型，那么Candidate和Follower角色的Server是如何做出区分的，同时又是如何回应的。
+
+  * 在Raft的原文中提到了两种Rpc，一种是RequestVote主要是在当一个集群中的Follower无法感知到Leader时，此时Follower的角色就会转换成Candidate，此时就会使用RequestVote类型的Rpc与集群中其他Server进行通信。这个通信的目的是让其他 Follower知道自己已经是Candidate，投自己一票。还有一种是Entries Rpc，这种Rpc请求的方式就是Server将自己的log同步给Follower。
 
 * 选举问题六：那么这个时候衍生出一个问题，当一个集群正常运行时，集群中的Follower是如何知道其他 Follower的地址的。
   
-  选举六答：我想应该是当一个Candidate在成为Follower的同时，应该会发送一个Rpc请求，将集群中存活的所有Server的IP和Host同步给集群中所有的Follower。那么这中Rpc使用的是RequestVote Rpc还是使用Entries Rpc呢？如果是让我来设计，我应该如何设计呢？我想我会创建一个新的Rpc来解决这个问题。
+  * 我想应该是当一个Candidate在成为Follower的同时，应该会发送一个Rpc请求，将集群中存活的所有Server的IP和Host同步给集群中所有的Follower。那么这中Rpc使用的是RequestVote Rpc还是使用Entries Rpc呢？如果是让我来设计，我应该如何设计呢？我想我会创建一个新的Rpc来解决这个问题。
 
 * 选举问题七：加入一个集群中有5台Server，如果其中的Leader已经挂掉了，同时另一台 Follower也挂掉了，那么此时进入选举环节，其中剩余的每一台Server都会从Follower转换成Candidate角色。此时每一个Candidate都会给集群中的其他Server发送Vote Rpc（因为Candidate只知道Leader宕机了，并不知道另一台Server也宕机了，因此会发送出4个请求），此时Candidate首先会投自己一票，然后剩余的两票来自其他的Server，那么这个时候这个Candidate只得到的三票。这个时候这个Candidate还是可以获胜的，因为可以理解为5票中获取了3票，依旧是获取了集群中大部分集群的投票，此时Candidate会成为Leader。假设 Leader宕机的同时，另外还有两台Server也宕机了，此时两个Candidate会出现的情况是各自获得一票，或者是获得两票，那么此时Candidate会成为Leader吗？如果能够成为Leader是不是就默认集群中所有的Server都能感知到其他Server已经宕机的了，如果不是这种方式，那么又是如何解决的。
   
-  这里从[Raft](https://raft.github.io/)官网可以看到这个如果集群中有五台Server，那么一旦有其中的三台Server宕机了，那整个集群就会陷入到无尽的选举过程，因为每一个Candidate都无法获得整个集群中半数以上（≥3）的投票，因此剩下的Server都会成为Candidate，成为Candidate的Server会不断的升级自己的 term。
+  * 这里从[Raft](https://raft.github.io/)官网可以看到这个如果集群中有五台Server，那么一旦有其中的三台Server宕机了，那整个集群就会陷入到无尽的选举过程，因为每一个Candidate都无法获得整个集群中半数以上（≥3）的投票，因此剩下的Server都会成为Candidate，成为Candidate的Server会不断的升级自己的 term。
 
 * 选举问题八：如何防止一个Follower在选举期间只给其中一个Candidate投票，而不是给多个Candidate投票。
+  * 在Raft论文提到了，每个term，Follower只给一个Candidate投票，因此不会出现一个Follower给多个Candidate投票的问题。
 
 ## 二、复制 - Replicate
 
@@ -141,6 +152,12 @@ Raft主要关注的三个方面，
 * client与Cluster集群之间建立连接后，需要解决的另外一个问题如何保证Client的一个请求只会被commit一次，而不会被执行两次，执行两次是什么情况呢？如果Client第一次和Leader进行交互，如果此时Leader已经让集群中大多数Server复制了entry（针对这次请求的entry），同时Leader也将entry提交给了state machine，但是在state machine执行完成之后Leader宕机，此时无法回应用户的请求。当集群下一次选出一个新的Leader，Client与new Leader重新建立连接，此时Client再一次请求执行之前的操作， new Leader会把之前已经执行过的command重复执行一次，相当于client只想针对变量x = 1自增1，但是因为服务器的崩溃导致服务器执行了两次，此时x = 3了。Raft还需要解决写一致性。
 * 如果一个分布式系统存在写一致性，那么也会存在读一致性，这个问题应该如何解决呢？
 
-
+## TODO List
+* 回答一些今天在写PPT的时候遇到的问题
+* 完成Raft论文笔记的重构
+  
 ## 学习资料
 [How I am learning distributed systems](https://medium.com/@polyglot_factotum/how-i-am-learning-distributed-systems-7eb69b4b51bd)
+
+
+
