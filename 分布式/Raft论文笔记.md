@@ -81,6 +81,7 @@ Raft主要关注的三个方面，
 
 * 选举十二问：如何防止一个Follower在选举期间只给其中一个Candidate投票，而不是给多个Candidate投票。
   * 在Raft论文提到了，每个term，Follower只给一个Candidate投票，因此不会出现一个Follower给多个Candidate投票的问题。
+  * 
 
 ## 二、复制 - Replicate
 * 复制一问：当一个集群在一个term开始阶段经历了选举完成，并选举出了一个Leader，那么此时Leader是如何接受Client的请求的，同时又是如何保证Client的请求在Leader和Follower机器上保证一致性。
@@ -117,7 +118,12 @@ Raft主要关注的三个方面，
   * 这个问题应该怎么回答呢？我理解如果在当前轮Candidate无法获得半数以上的投票，那么次轮投票结束，因此下一轮大家都会升级自己的term，然后每一个机器都会成为Candidate角色。如果是按照这种假设。
   * 那么其他原先为Follower的Server是如何知道这轮投票结束的，因为之前我们只是说如果Server在Follower状态在election timeout内没有收到Leader的心跳检测请求，就会从Follower状态转变成为Candidate状态，现在是进入投票环节，那么Follower是如何从Candidate状态转变成为Candidate状态呢？如果没有这个环节，那么整个集群永远也选不出一个合格的Leader。 
   * 在试用了[Raft](https://raft.github.io/)，对于上面的问题又了一个初步的答案，如果一个慢的Server（就是复制Leader的log比较慢）成为了Candidate，其他Follower在收到慢Server的RequestVote RPC的时候，其他机器会进入到timeout election，然后这些机器一旦election timeout后就会进入Candidate状态。
-  * 在一个Server在收到了其他Server的投票请求之后，就进入election timeout倒计时，一旦倒计时完成之后，就会进入Candidate状态。所有的规则都是根据election timeout（一旦过期就进入Candidate状态）。
+  * 如果Server在收到AppendEntries RPC或者RequestVote RPC时，这时Follower会重新计时，如果在Follower重新计时结束后还没有收到Leader的AppendEntries RPC或者还没有收到Candidate发出的RequestVote RPC，就会自动转换成Candidate状态。
+  * 如果一个Follower收到的Candidate的RequestVote RPC发现Candidate的log还没有自己长（已提交的entry长度），如果这个Server已经提交了这个entry，那么肯定是集群中有大半Server已经提交了，那么这个Candidate是无法获取到集群中半数的投票，所以集群中大半Server会给这个Candidate投反对票，然后大家都进入 election timeout倒计时，计时结束后，最先计时完毕的Server状态会从之前的Follower转变成为Candidate状态，然后给其他Server投票。其实从这个机制就很好的保证了不会有slow Server一直是Candidate参与选举，其他Server也能保证自己能够成为Candidate被选举成为Leader。
+  * 这里还有一个疑问就是如果Slow Server成为Candidate，那么在选举过程中被大多数Server投了反对票是等投票结束以后，然后重新进入election timeout计时还是说投票过程也算是election timeout。就是说此时Candidate的投票计时和election timeout是否共用一个计时。
+  ![avatar](/分布式/img/slow-server-candidate.png)
+  其实在这种情况下，当Follower开始进入到election timeout环节时，对于已经拒绝的RequestVote RPC是不会重新计时的，也就是继续当前计时，计时结束还没有收到其他AppendEntries RPC时，就会进入Candidate状态。那么我们还需要看一下如果时给其他符合条件的Candidate投票，此时应该如何处理。从官网的展示来看，如果是正常投票，那么其他Follower会进入重新倒计时。
+  
 * 如果一个集群中只是单纯的以某一个Follower因为election timeout，就进入Candidate状态，然后开始选举，那么集群中只要有慢的
 
 
