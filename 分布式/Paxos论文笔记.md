@@ -56,7 +56,40 @@
 * 从这个文档其实可以看出来Paxos首先需要提出一个proposal number，如果acceptor中有超过一半的acceptor接受了这个proposal number，那么此时proposer就会把自己的value发送给acceptor。有个疑问，如果在第一步也就是acceptor在接受了proposer提出的proposal number也写入了自己的寄存器，但是就是在回复proposal的时候宕机了，然后proposer因为这一个acceptor的宕机，导致proposer无法获取超过半数的acceptor，此时这个法案就没有办法继续下去，那么Paxos应该如何处理呢。（今天先写到这里，实在是太困了，希望明天能够好好看完相关的论文，实在是太累了）
 ## Paxos made simple- 论文笔记
 ## Paxos made moderaely complex论文笔记
+其实在读这篇论文的时候，没有搞清楚replica是一个什么样的角色，以为之前在看Paxos的时候会说存在三种角色，一个是Proposer、Acceptor、Learner。但是这篇文章只给出了一个replica的概念，就很模糊。
 
+一些术语
+
+* state machine：state machine由一个state集合，state的状态转换集合、当前state组成。state A转换到state A是允许的（如果用户的request是只读的command）。deterministic state machine概念，state的转换只是与operation和之前的state相关。其实这里的state machine可以理解为每一个operator对应一个state，多个operation对应多个state因此就构成了一个state collection。同时每一个operator都会导致state的transition（也就是状态的转换），从一个状态转换成另一个状态。
+* asynchronous  network：这里的异步网络和我们之前在操作系统的同步和异步是不一样的/这是network中的一个专有名词，表示两台server在通信期间的时长是任意长的（因为在ATM网络中是专门划分带宽来实现网络通信的，因此通信的时长是固定的一个人说话，另一个人在很短时间就能接收到，具体关于asynchronous network可以去看《数据密集型应用设计》）
+* crash failure：
+* state machine replication：我们有一些state machine的副本，这些副本执行operation的顺序以及最终输出的结果和master state machine保持一致。
+
+* 这里其实在文章中提到了一个stub routine.关于stub routine的概念参考[stub routine](https://stackoverflow.com/questions/4029313/what-is-a-stub-routine)。文中说客户端进程通过调用存根库通过网络发送command给Server然后等待结果。
+* 而远端的stub routine是通过个
+* 
+关于一些参数的解读
+* $k$：client
+* <$k$, $cid$, $op$>：command， $cid$是client的唯一标识符，$op$ 表示client需要执行的操作。这是一个三元组，用一个三元组表示用户的请求。
+
+* <$cid$, $result$>：replicas的对client的响应结果，$cid$表示client的唯一标识符，$result$标识replicas对client的响应。
+
+* $slot$：表示replicas用于存储command（对应一个<$k$, $cid$, $op$>三元组），replicas用一个slots集合（也可以说是一个slot数组存储command）。
+
+* ($s$, $c$)：标识slot $c$，存储的是proposal $c$。
+* 一个replicas维护下面四个变量
+  * $\rho.state$：应用程序的副本状态。
+
+  * $\rho.slot\_num$：replicas当前的slot number。
+
+  * $\rho.proposals$：副本过去提出的一组提案。
+
+  * $\rho.decisions$：已经决定了的proposals集合。
+
+关于一些不变量的解读
+
+* 文中描述，为了避免不一致性，一个replicas会等待slot确定下来之后再升级自己的state和计算结果返回给用户之前，其实这里的逻辑和Raft的逻辑很相似了。
+* Paxos并不要去replicas每时每刻都一致，但是需要replicas在将operation应用到application state的是时候是以相同的顺序。
 ## Paxos made live: an engineering perspective 论文笔记
 
 ## 学习资料
