@@ -55,53 +55,83 @@
 
 * 从这个文档其实可以看出来Paxos首先需要提出一个proposal number，如果acceptor中有超过一半的acceptor接受了这个proposal number，那么此时proposer就会把自己的value发送给acceptor。有个疑问，如果在第一步也就是acceptor在接受了proposer提出的proposal number也写入了自己的寄存器，但是就是在回复proposal的时候宕机了，然后proposer因为这一个acceptor的宕机，导致proposer无法获取超过半数的acceptor，此时这个法案就没有办法继续下去，那么Paxos应该如何处理呢。（今天先写到这里，实在是太困了，希望明天能够好好看完相关的论文，实在是太累了）
 ## Paxos made simple- 论文笔记
-## Paxos made moderaely complex论文笔记
-其实在读这篇论文的时候，没有搞清楚replica是一个什么样的角色，以为之前在看Paxos的时候会说存在三种角色，一个是Proposer、Acceptor、Learner。但是这篇文章只给出了一个replica的概念，就很模糊。
+### 三种角色
+* Proposer：提出Proposal，可以理解为提出一个法案
+* Acceptor：Acceptor根据Proposer提出的Proposal，决定是否接受proposal number和最终的 value。
+* Learner：Acceptor选择了最终的法案后，会把法案同步给所有的Learner。
 
-一些术语
 
-* state machine：state machine由一个state集合，state的状态转换集合、当前state组成。state A转换到state A是允许的（如果用户的request是只读的command）。deterministic state machine概念，state的转换只是与operation和之前的state相关。其实这里的state machine可以理解为每一个operator对应一个state，多个operation对应多个state因此就构成了一个state collection。同时每一个operator都会导致state的transition（也就是状态的转换），从一个状态转换成另一个状态。
-* asynchronous  network：这里的异步网络和我们之前在操作系统的同步和异步是不一样的/这是network中的一个专有名词，表示两台server在通信期间的时长是任意长的（因为在ATM网络中是专门划分带宽来实现网络通信的，因此通信的时长是固定的一个人说话，另一个人在很短时间就能接收到，具体关于asynchronous network可以去看《数据密集型应用设计》）
-* crash failure：
-* state machine replication：我们有一些state machine的副本，这些副本执行operation的顺序以及最终输出的结果和master state machine保持一致。
+### safety
+其实我们在写下Paxos的流程之前，我们首先需要从文中了解到Paxos的safety关注的事情
+* 只有一个曾经被proposed的value才能被chosen；
+* 每次只能选择一个value（这里我们可以理解为针对某一个法案，只能有一个决议）；
+* 一个learner无法了解到一个未成被accepted的proposal（这里的proposal包含一个number，一集value）
 
-* 这里其实在文章中提到了一个stub routine.关于stub routine的概念参考[stub routine](https://stackoverflow.com/questions/4029313/what-is-a-stub-routine)。文中说客户端进程通过调用存根库通过网络发送command给Server然后等待结果。
-* 而远端的stub routine是通过个
-* 
-关于一些参数的解读
-* $k$：client
-* <$k$, $cid$, $op$>：command， $cid$是client的唯一标识符，$op$ 表示client需要执行的操作。这是一个三元组，用一个三元组表示用户的请求。
+### chosen
 
-* <$cid$, $result$>：replicas的对client的响应结果，$cid$表示client的唯一标识符，$result$标识replicas对client的响应。
+chosen描述的是如果一个proposer提出的proposal被集群中大多数acceptor接受的话，那么就说proposal $n$ 被选择了了。
 
-* $slot$：表示replicas用于存储command（对应一个<$k$, $cid$, $op$>三元组），replicas用一个slots集合（也可以说是一个slot数组存储command）。
+### 证明
+#### 引理P1
+**P1a：一个Acceptor如果只接受第一次收到的Proposal** 
 
-* ($s$, $c$)：标识slot $c$，存储的是proposal $c$。
-* 一个replicas维护下面四个变量
-  * $\rho.state$：应用程序的副本状态。
+* 当集群中只有一个Acceptor时，如果一个Acceptor只接受第一次收到的Proposal。假设集群中所有的Proposer同时发起Proposal，此时只要Acceptor接受第一个收到的Proposal，此时P1引理能够保证整个集群达成共识。**这里补一张图**
 
-  * $\rho.slot\_num$：replicas当前的slot number。
+* 如果一个Acceptor只接受第一次收到的Proposal，那么如果多个proposer同时发起Proposal，那么此时就会出现每一个Proposal智能得到集群中一半的Acceptor的投票，没有一个Proposer提出的Proposal能够获得集群中大多数Acceptor的投票，因此整个集群就无法达成一个共识。**这里补一张图**
 
-  * $\rho.proposals$：副本过去提出的一组提案。
 
-  * $\rho.decisions$：已经决定了的proposals集合。
+因为单纯的依赖引理无法实现系统达成共识，因此需要更强的条件才能实现整个集群达成共识。那么也就是说一个Acceptor只接受第一次收到的Proposal这个条件是无法达成共识的，也就意味着一个Acceptor接受（accept）的提案不只一个，但是要保证集群能够达成共识，那么Acceptor在多次接受（accept）提案时，提案的value v必须要保持一致。
 
-关于一些不变量的解读
+因为前面探讨的都是一阶段协议，我们知道一个Acceptor如果每次批准的提案都要有相同的value v。那么是不是说明Proposer在发起提案（Proposal）时需要和Acceptor之间要有一个沟通过程。这里就是说需要一个两阶段协议，第一阶段Proposer和Acceptor之间进行沟通，第二阶段将第一阶段获取的信息向Acceptor发起提案，最终根据Acceptor返回的结果决定是否可以提交（commit）。**这里补一张图**
 
-* 文中描述，为了避免不一致性，一个replicas会等待slot确定下来之后再升级自己的state和计算结果返回给用户之前，其实这里的逻辑和Raft的逻辑很相似了。
-* Paxos并不要去replicas每时每刻都一致，但是需要replicas在将operation应用到application state的是时候是以相同的顺序。
-## Paxos made live: an engineering perspective 论文笔记
+
+#### 引理P2
+**引理P2：如果一个带有value v的提案（Proposal）已经被集群批准（chosen），那么后续任意Acceptor批准的提案也需要有value v。**
+
+* 正是因为前面说的一个Acceptor如果只接受第一次收到的Proposal，那么在只有一个Acceptor的情况下，是可以达成共识的。但是当有多个Acceptor的时候就会出现每一个Proposer都只获得半数的Acceptor的投票。所以这里有了一个加强。根据这个引理P2，我们可以知道，既然要求任意一个Acceptor在接受提案时必须是之前已经接受的提案（这里有一个前提就是如果之前已经有提案达成共识了，如果没有提案达成共识，其实是可以接受第一次）那么是不是就可以得出下面的引理。
+
+
+
+**引理P2a：一旦一个具有 value v 的提案被批准（chosen），那么之后任何 acceptor 再次接受（accept）的提案必须具有 value v。**
+
+* 我们假设有5台Server，分布为Proposer1、Acceptor2、Acceptor3、Acceptor4、Proposer5。假设Proposer1提出的提案（1.1，$v1$）已经被通过了，其中Acceptor2和Acceptor3批准了提案（1.1，$v1$），但是Acceptor4、Proposer5在前面提案批准的时候出于宕机或者是网络问题导致Acceptor4并不知道这个共识。现在Acceptor4和Proposer5重启之后，Proposer5向Acceptor3和Acceptor4发起了提案（5.2，$v5$），这个时候需要Acceptor4并不知道之前达成了共识，根据引理P1，Acceptor要接受这个提案，但是Acceptor4要多次接受提案，那么这个时候引理P2但是Acceptor3知道。那么如何让整个系统达成一个共识呢？
+
+**引理P2b：如果一个带有value v的提案（Proposal）已经被批准（Chosen），那么后续任意Proposer在发起提案时也需要携带value v。**
+
+* 因为根据前面说的每一个Acceptor在批准提案的时候必须和之前已经通过的提案的value一致。那么Acceptor的响应时根据Proposer发起的请求，假设我们有三个Acceptor（Acceptor2、Acceptor3、Acceptor4），之前Proposer1发起的提案的value为$v1$已经被批准了，那么Proposer5在第二阶段发起提案的时候，也必须携带value $v1$，对应的请求参数为(5.2，$v1$）。
+
+
+**引理P2c：P2c：如果一个编号为 n 的提案具有 value v，该提案被提出（issued），那么存在一个多数派，要么他们中所有人都没有接受（accept）编号小于 n 的任何提案，要么他们已经接受（accept）的所有编号小于 n 的提案中编号最大的那个提案具有 value v。**
+
+
+
+
+### Paxos流程. 
+* Phase 1
+  * proposer 选择一个序列号为n，然后发送一个prepare请求给majority acceptors。
+  * 如果accept收到了一个序列号为n的proposal，这个序列号比之前收到的prepare request（不管之前是否已经responded，都会accept序列号为n的proposal）的序列号都要大。acceptor会回复
+* phase 2
+  * 如果$proposer_1$收到了大多数$acceptor$的回复是accept，同时携带的proposal number $n_1$。$acceptor$ 返回的proposal number $n_1$是$proposer_1$ 发送的prepare请求的proposal number。此时$proposer_1$ 就会向$acceptor$ 发起一个请求，这个请求包含了之前的proposal number $n_1$，同时也包含了要提出的$value$。
+  * $acceptor$ 接受到$proposer_1$提出的accept请求后，如果此时acceptor最新accept的proposal number是$proposer_1$ 提出的 proposal number $n_1$。acceptor返回同意，同时将对应的 proposal number $n$和对应的value已经accept码。
+  * 如果acceptor在收到proposer提出的accept请求时发现其他$proposer_2$ 提出了更高的proposal number $n_2$，其中$n_2 > n_1$。此时acceptor就会拒绝这个$proposer_1$ 提出的accept请求，同时返回当前 acceptor已经accept的proposal number $n_2$。此时proposer在重复上面的请求。
+
+* 问题：如果集群中出现了多个Proposer，那么就会出现上面phase 2提到的问题，什么问题呢？我们下面仔细阐述问题和对应的解决方案。
+
 
 ## 学习资料
 [Understanding Paxos](https://people.cs.rutgers.edu/~pxk/417/notes/paxos.html)
 
 [Paxos算法](https://zh.wikipedia.org/zh-hk/Paxos%E7%AE%97%E6%B3%95)
-
 [Consensus Protocols: Three-phase Commit](https://www.the-paper-trail.org/post/2008-11-29-consensus-protocols-three-phase-commit/)
+
 [Paxos made simple-Conference](https://www.cs.columbia.edu/~du/ds/assets/papers/paxos-simple.pdf)
+
 [Paxos made simple-PPT](https://15799.courses.cs.cmu.edu/fall2013/static/slides/paxos_made_simple.pdf)
+
+[图解超难理解的 Paxos 算法（含伪代码）](https://xie.infoq.cn/article/e53cbcd0e723e3a6ce4be3b8c)
 
 [Paxos made live: an engineering perspective](https://news.cs.nyu.edu/~jinyang/ds-reading/paxos-live.pdf)
 
 [Paxos made moderaely complex](https://www.cs.cornell.edu/home/rvr/Paxos/paxos.pdf)
 
+[Paxos](https://martinfowler.com/articles/patterns-of-distributed-systems/paxos.html)

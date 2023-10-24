@@ -64,7 +64,7 @@ Raft主要关注的三个方面，
   * 在Raft 博士论文当中的Figure 3.1中明确指出了如果一个Follower在收到Leader的AppendEntries RPC请求，此时如果$Server_{term} > Leader_{term}$，此处用Server代替Follower和Candidate，此时Server 会返回自己的term，Leader发现自己的term已经过时了，因此会更新自己的term，同时因为此时这个Leader已经不再是Leader了，因此状态转换成Follower状态。
   
 
-* 选举八问：当选举中是否会出现多个Leader（即分布式中著名的拜占庭将军问题），同时多个Leader是否最终能够由一个Leader来统领，Raft算法是如何解决词问题的。
+* 选举八问：当选举中是否会出现多个Leader（即分布式中著名的拜占庭将军问题），同时多个Leader是否最终能够由一个Leader来统领，Raft算法是如何解决此问题的。
   * 每个Follower都有自己的election timeout，而且这个每一个follower的election timeout的时间范围为[150,300]ms。那么这里就会出现150个不同的election timeout，如果时间更精确一点的话，可以有有无数的election timeout。
 
 * 选举九问：选举中Candidate发出的请求和选举完成之后发出的心跳保活请求是否是同一个类型，那么Candidate和Follower角色的Server是如何做出区分的，同时又是如何回应的。
