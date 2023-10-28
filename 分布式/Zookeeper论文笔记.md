@@ -1,0 +1,15 @@
+# Zookeeper论文笔记
+
+
+
+## 一、Zookeeper数据结构
+Zookeeper的内部数据结构和unix的文件系统类似，每一个/usr/ztm/foo，就是一个集
+
+## 二、Zookeeper读写
+Zookeeper的机器分为Follower和leader两种角色，一个集群中只有一个leader，其他的都是follower。Follower会采用不同的策略处理Client的读请求和写请求。每个Follower在接受到Client请求时，会把写请求转发给leader，而针对读请求，会将本地结果返回给client。Follower处理读请求，Leader处理写请求，从这种多机读，一机写，写请求必然会有瓶颈。虽然多台机器可以处理读请求，提升了系统的读请求的TPS，但是随之带来的也会有一个问题就是读请求读到的是Follower的本地的state（state就是描述变量执行一连串的写请求后的结果，所以Zookeeper是一个写强一致性，但是读不是。
+
+这里有一个疑问就是，现在有一个client，我们用$c_1$表示，发起了一个write request，我们用$r_1$表示，因为$r_1$这个写请求由Leader处理，然后Leader向集群中所有的Follower发起投票，但是因为有些机器比较慢，有些机器比较快。我们假设集群中有5台Server，其中Server1是Leader角色，其他的四台机器为Follower，我们用Follower2～Follower5表示。现在Leader1接收了$c_1$的请求参数，然后获的Follower2~Follower3的投票，也就是超过了半数的投票，所以这个时候就可以Leader就可以将请求$r_1$交给state machine执行，然后将结果返回给client。
+
+如果这个时候请求$r_1$的请求因为Follower4和Follower5因为宕机了，或者因为网络问题，Follower4和Follower5的没有收到$r_1$，但是此时有client2向Follower4发起了读请求$r_2$，client3向Follower5发起了读请求$r_3$，因为之前的宕机，Follower4和Follower5并没有执行$r_1$的请求，所以此时client2和client3读取的只是过期的数据。其实还有好多环节都会出现这种读请求会读不到最新的数据，所以Zookeeper并不适用读强一直性的场景。所以Zookeeper是读强一致性，写非一致性，也就是<strong><em>Zookeeper不是一个强一致性的算法</strong></em>。
+
+## 三、Zookeeper案例
