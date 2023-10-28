@@ -1,9 +1,7 @@
 # Zookeeper论文笔记
 
-
-
 ## 一、Zookeeper数据结构
-Zookeeper的内部数据结构和unix的文件系统类似，每一个/usr/ztm/foo，就是一个集
+Zookeeper的内部数据结构和unix的文件系统类似，每一个/usr/ztm/foo，
 
 ## 二、Zookeeper读写
 Zookeeper的机器分为Follower和leader两种角色，一个集群中只有一个leader，其他的都是follower。Follower会采用不同的策略处理Client的读请求和写请求。每个Follower在接受到Client请求时，会把写请求转发给leader，而针对读请求，会将本地结果返回给client。Follower处理读请求，Leader处理写请求，从这种多机读，一机写，写请求必然会有瓶颈。虽然多台机器可以处理读请求，提升了系统的读请求的TPS，但是随之带来的也会有一个问题就是读请求读到的是Follower的本地的state（state就是描述变量执行一连串的写请求后的结果，所以Zookeeper是一个写强一致性，但是读不是。
@@ -12,4 +10,11 @@ Zookeeper的机器分为Follower和leader两种角色，一个集群中只有一
 
 如果这个时候请求$r_1$的请求因为Follower4和Follower5因为宕机了，或者因为网络问题，Follower4和Follower5的没有收到$r_1$，但是此时有client2向Follower4发起了读请求$r_2$，client3向Follower5发起了读请求$r_3$，因为之前的宕机，Follower4和Follower5并没有执行$r_1$的请求，所以此时client2和client3读取的只是过期的数据。其实还有好多环节都会出现这种读请求会读不到最新的数据，所以Zookeeper并不适用读强一直性的场景。所以Zookeeper是读强一致性，写非一致性，也就是<strong><em>Zookeeper不是一个强一致性的算法</strong></em>。
 
-## 三、Zookeeper案例
+## Zookeeper日志
+因为Zookeeper需要考虑宕机重启之后需要恢复之前的状态，如果只是将数据写入到内存，一旦服务器宕机，那么之前的状态就会丢失，然后需要和Leader之间进行数据同步。如果Follower在整个集群刚启动的时宕机，此时通过Follower和Leader之间通过通信就可以完成Follower的状态恢复。但是如果假如Leader和Follower之间启动已经一个月了，但是Follower这个时候所有的日志和状态都保存在内存了，宕机之后，Follower如果要和Leader之间通过数据同步完成状态恢复，可能需要好几天的时间才能同步所有的数据，在这几天过程中Leader又接受了新的写请求，所以Follower又落后了。那么现在有一个问题就是如何将历史的状态写入到硬盘（disk）当中，一旦某一个Follower宕机，此时Follower和Leader之间不再需要通过日志同步的方式完成状态（state）的同步。
+
+其实在表达这里的写请求写入到本地和硬盘中，是因为如果一旦一个集群所有的机器都宕机了，那么整个集群就会出现状态丢失，因此就必须将日志一部分写入到本地，然后最近的历史状态需要写入到硬盘当中。这里把Zookeeper的日志持久化和Raft算法的日志持久化进行比较
+
+## 三、Zookeeper Leader选举
+
+## 四、Zookeeper案例
