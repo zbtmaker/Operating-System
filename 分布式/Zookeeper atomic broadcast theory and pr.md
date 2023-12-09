@@ -1,4 +1,4 @@
-<div align='center'><font size = '5'>Zookeeper atomic broadcast theory and practice</font></div></center>
+<div align='center'><font size = '10'>Zookeeper atomic broadcast theory and practice</font></div></center>
 
 # Zab 协议
 此论文中将Zab 协议划分为四个阶段，与原来的三个阶段，划分为四个阶段：选举、发现、同步、广播。
@@ -24,5 +24,13 @@
   
   *  当$Follower \ F$收到$Leader\ L$消息后，此时就需要执行deliver操作将所有的事物交给process进行处理。**$Follower \ F$进入Phase3**。
 
-* Phase3-广播
-  * 放黄豆酱撒了
+* Phase3-广播：$Leader L$ 收到 $Follower F$的写请求（注意，对于Zab协议对于读请求都是由各自的Follower处理的，针对写请求，Follower会把请求转发到Leader处理）。在广播阶段主要处理Follower的写请求，同时如果有新的Follower申请加入Leader，那么Leader负责将历史请求同步给新加入的Follower。
+  * 因为Follower不处理写请求，而是将请求转发给Leader。同时Zookeeper会保证如果一台Server没有宕机，那么一台机器如果之前的写请求是由Follower1处理的，那么在后续的读请求也会由 Follower1处理.这种方式虽然没有保证整个集群的线性一致性，但是保证了整个集群实现高吞吐量，这也是Zookeeper的优点。但是这里也有一个问题就是如果在写完之后，这台机器宕机的同时，Leader也宕机了，这个时候整个集群处于选举过程中，因为Zookeeper保证了没有Leader也是可以处理读请求的，那么会不会把这个请求转发到一个慢Server上处理，正因为这个慢Server每次响应Leader的请求都慢一些，所以Client之前的写请求，这台慢Server没有响应Leader的$proposal<e',<v,z>>$请求，Client看到的就是旧数据。或者是说Leader没有宕机，但是响应这台机器的请求因为某种原因宕机了。那么这个Client的请求会不会被分配到慢Server上，Zookeeper又是如何避免这个问题的。
+  * 首先来看写请求的处理流程。Follower收到Client的请求 $Proposal(e', \left \langle v,z \right \rangle)$ ，首先会将请求转发给  $Leader \ L$，Leader会首先将请求发送给各个Follower。
+  * Follower收到$Leader \ L$的请求后，会将   $Proposal(e', \left \langle v,z \right \rangle)$记录在 $F.history$中。$Follower \ F$处理完成之后会发送$ACK(e',\left \langle v,z \right \rangle)$请求给$Leader \ L$。
+  * $Leader \ L$ 在收到半数以上的Follower的 $ACK(e',\left \langle v,z \right \rangle)$回复后，就会给各个Follower发送$COMMIT(e',\left \langle v,z \right \rangle)$ 请求
+  * Follower在收到Leader的$COMMIT(e',\left \langle v,z \right \rangle)$后会拿本地的Zxid和Leader的Zxid比较，如果$z_f < z_l$此时就会先提交$Follower \ F$之前的事物，等之前的事物提交之后，再处理当前的请求$COMMIT(e',\left \langle v,z \right \rangle)$ 。如果当前$Follower \ F$ 之前的事物已经处理完成了，就会立即提交当前事物给process处理。
+  * Leader在BroadCast阶段另一件事情就是如果有新的Follower申请加入集群，那么Leader需要将自己的$L.history$同步给new Follower。比方说，如果整个集群运行了三年，那么是需要new Follower将历史的数据全部同步嘛，还是说我只同步最新的一个状态就可以了，如果是要同步三年的历史数据，那么一个Follower可能在短期内是无法实现全部同步，应该是会有压缩的。我们可以看一下具体的信息。
+  * 当一个新的Follower想要加入一个集群时，首先我们可以理解Follower应该是不知道哪台机器是Leader，那么集群中就可以定一个一个新的请求，比方说new Follower向集群中某一台机器发起了请求，请求命中了另一台机器也是Follower角色，此时当前的Follower就会把Leader信息返回给Leader，同时告诉new Follower这是一个重定向协议，你应该重新和Leader建立协议（这个逻辑有点像Redis的slot寻找的逻辑）。
+  * 第一步建立起链接之后，Leader收到了来自new Leader的$FOLLOWERINFO(e)$的请求，此时Leader会发送两个响应给Follower，这里有点奇怪，为什么在实现过程时没有合并两个请求为一个请求发送。这里的两个响应一个是 $NEWEPOCH(e')$主要是同步当前的的epoch值给 new Follower。另一个就是 $NEWLEADER(e', L.history)$，主要是把Leader的已经提交的历史的日志同步给新Follower。
+  * new Follower收到Leader发送的两个信息，并将Leader的历史日志保存到本地后，就会返回一个$ACKNEWLEADER$响应给Leader，Leader此时就会发送一个$COMMIT$给Follower，follower此时才会将自己的日志交给process去提交。到此一个new Follower算是加入了这个集群。
