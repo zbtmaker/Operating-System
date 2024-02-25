@@ -1,0 +1,113 @@
+# ES使用案例
+## 一、ES概念和SQl概念比较
+|  Mysql   | ElasticSearch  |
+|  ----  | ----  |
+|  数据库  | 索引 |
+|  表  | 类型 |
+|  行  | 文档 |
+|  列  | 字段 |
+|  索引  | 反向索引 |
+|  delete  | DELET |
+|  update  | PUT |
+|  select  | GET |
+
+### 什么是分片
+
+### 什么是副本
+
+### 什么是mapping
+
+
+## 二、ES使用
+### 保存
+```java
+# Click the Variables button, above, to create your own variables.
+PUT test_index/_doc/1
+{
+  "name":"zoubaitao"
+}
+```
+其实这里相当于创建了一个test_index类型的索引，_doc是文档类型，1表示文档名称，其中的name是字段名称。
+
+输出结果
+```java
+{
+  "_index": "test_index",
+  "_id": "1",
+  "_version": 1,
+  "result": "created",
+  "_shards": {
+    "total": 2,
+    "successful": 1,
+    "failed": 0
+  },
+  "_seq_no": 0,
+  "_primary_term": 1
+}
+```
+
+### 查看索引
+```java
+GET /test_index
+```
+输出结果
+```java
+{
+  "test_index": {
+    "aliases": {},
+    "mappings": {
+      "properties": {
+        "name": {
+          "type": "text",
+          "fields": {
+            "keyword": {
+              "type": "keyword",
+              "ignore_above": 256
+            }
+          }
+        }
+      }
+    },
+    "settings": {
+      "index": {
+        "routing": {
+          "allocation": {
+            "include": {
+              "_tier_preference": "data_content"
+            }
+          }
+        },
+        "number_of_shards": "1",
+        "provided_name": "test_index",
+        "creation_date": "1702779368529",
+        "number_of_replicas": "1",
+        "uuid": "EfzsXnbzQI6DebAQfFd1DA",
+        "version": {
+          "created": "8500003"
+        }
+      }
+    }
+  }
+}
+```
+
+如果我现在想在这个索引的文档文档下新增字段又该如何操作呢？
+```java
+POST /test_index/_mapping
+{
+  "properties":{
+    "sex":{
+      "type":"text"
+    }
+  }
+}
+```
+返回结果
+```java
+{
+  "acknowledged": true
+}
+```
+
+
+### 查询
