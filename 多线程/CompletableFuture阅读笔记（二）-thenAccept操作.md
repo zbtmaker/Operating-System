@@ -1,6 +1,7 @@
-CompletableFuture阅读笔记（二）-thenAccept操作
+# CompletableFuture阅读笔记（二）-thenAccept操作
 
 thenAccept操作有三种操作，同步和异步，异步方法中可以指定线程池，也可以使用默认线程池。
+
 ## 源码解析
 我们从单个依赖入手，了解CompletableFuture的原理
 ```java
@@ -153,17 +154,14 @@ CompletableFuture的push主要是首先要判断入参是否为空。如果resul
     static final class UniAccept<T> extends UniCompletion<T,Void> {
         // 省略构造函数、field，主要关注tryFire方法
 
-
-        /**
-         * 这里因该是为了防止UniAccept在加入到栈时依赖的CompletableFuture已经执行完毕
-         * 如果依赖的CompletableFuture为null，那么就不执行下面的流程
-         * 如果依赖的CompletableFuture还没有执行完成，此时tryFire方法返回null
-         * 因为如果d.uniAccept执行以后返回false，那么说明UniAccept依赖的任务还没有执行完成
-         * 因为如果d.uniAccept执行以后返回true，那么说明UniAccept依赖的任务执行完成，同时UniAccept也已经执行完成
-         * 此时就应该执行postFire方法
-         */
         final CompletableFuture<Void> tryFire(int mode) {
             CompletableFuture<Void> d; CompletableFuture<T> a;
+            /** 
+             * 此时执行的是UniAccept的CompletableFuture的uniAccept的方法
+             * 如果此时a未执行完，也就是说UniAccept依赖的前一个CompletableFuture（src）没有执行完成，返回null
+             * 如果此时a执行完成，不管是正常退出还是异常退出，此时d.uniAccept会返回true，此时当前UniAccept也执行完成了
+             * 此时就会调用UniAccept对象的postFire方法来释放CompletableFuture（src）的stack（这些CompletableFuture）
+             */
             if ((d = dep) == null ||
                 !d.uniAccept(a = src, fn, mode > 0 ? null : this))
                 return null;
@@ -226,6 +224,13 @@ uniAccept方法
     /** The encoding of the null value. */
     static final AltResult NIL = new AltResult(null);
 ```
+
+* 如果依赖的CompletableFuture还没有执行完成，那么返回false，或者是传递的 Consumer为null或者UniAccept持有的CompletableFuture为null，则返回false。
+* 如果UniAccept依赖的CompletableFuture已经执行完成，判断是正常退出还是异常退出。如果是异常退出
+* 如果CompletableFuture执行完毕，则执行Consumer的Accept方法，同时CompletableFuture的结果需要作为Consumer的accept方法入参传递。
+* 执行完成以后将UniAccept的结果设置成NIL（new AltResult(null)）
+
+
 postFire
 
 ```java
